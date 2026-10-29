@@ -2,6 +2,15 @@
 
 The detailed notes written for each version before 3.0 are in [docs/HISTORY.md](docs/HISTORY.md).
 
+## 3.4.1 (October 2026)
+
+- Find keeps each book's query when switching tabs, without searching the next book or moving its reading position. Adapted from Songlan Nie's fork.
+- Classic Find uses up/down chevrons for previous/next matches; missing Classic icon mappings now have their corresponding SF Symbols. By Songlan Nie.
+- A parenthesized PDF link to a numbered statement, such as Result 3.21 in Axler, uses the statement's name when the book analysis and link destination agree. Ambiguous links and actual equations retain their labels.
+- Tabs keep their width while the Explorer is resized.
+- Dragging a tab to the right moves it into the target's place, including the last position. Adapted from Songlan Nie's fork.
+- If an older downloaded update is waiting to install, Check for Updates can set it aside and offer the newest release.
+
 ## 3.4.0 (October 2026)
 
 **Peeks you can keep in sight.**

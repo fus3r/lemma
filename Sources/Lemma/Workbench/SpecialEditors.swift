@@ -239,6 +239,12 @@ struct ReleaseNotesEditor: View {
     @Environment(\.theme) private var theme
 
     private let sections: [(String, String, [String])] = [
+        ("Lemma 3.4.1: keep your place", "check", [
+            "Find keeps each book's query without searching or moving its page when you switch tabs. Classic Find shows previous and next chevrons. Thanks to Songlan Nie.",
+            "Tabs keep their width while you resize the Explorer, and dragging a tab right can move it to the last position.",
+            "Links to numbered statements use the statement's name when the book and destination agree, including Result 3.21 in Axler.",
+            "Check for Updates can replace an older waiting download with the newest release."
+        ]),
         ("Lemma 3.4: peeks you can keep in sight", "eye", [
             "Drag a peek by its title bar to move it anywhere: it stays open while you read on, until you close it.",
             "⇧-click another reference to open its peek beside the ones already open: a figure and the theorem that uses it, side by side.",
@@ -313,7 +319,7 @@ struct ReleaseNotesEditor: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("What’s New in Lemma \(WelcomeEditor.version)").font(.system(size: 30, weight: .semibold, design: .serif))
                             .foregroundStyle(theme[.foreground])
-                        Text("October 2026 · 3.2, 3.1, and 3.0, the first public release").font(.ui(13)).foregroundStyle(theme[.descriptionForeground])
+                        Text("October 2026 · Updates since the first public release").font(.ui(13)).foregroundStyle(theme[.descriptionForeground])
                     }
                 }
                 ForEach(sections, id: \.0) { section in

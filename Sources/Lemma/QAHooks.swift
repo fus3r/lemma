@@ -205,6 +205,8 @@ extension StudyStore {
         state["navigator"] = navigatorSection.rawValue
         state["panel"] = showPanel ? panelTab.rawValue : nil
         state["split"] = split?.title
+        let find = FindController.shared
+        state["find"] = ["visible": find.isVisible, "query": find.query, "searched": reader.hasSearched, "results": reader.searchResults.count] as [String: Any]
         state["breadcrumb"] = breadcrumb().map(\.title)
         state["printedPage"] = printedLabel(for: reader.pageNumber - 1)
         state["analysis"] = analysis?.analysis.map { ["definitions": $0.definitions.count, "index": $0.index.count, "bibliography": $0.bibliography.count, "citations": $0.citations.count] }

@@ -44,7 +44,18 @@ final class ReferenceIndex {
             // Once the whole book is read, a mention links only to something the book defines, under the label it uses:
             // “figure 3” in running text or “(2.34)” for result 2.34 resolve, dead references do not underline.
             found = found.compactMap { mention in
-                guard mention.destination == nil else { return mention }
+                if let destination = mention.destination {
+                    // Books with one counter cite statements as “(3.21)” too. Rename such a PDF link only when
+                    // the book defines no equation by that number and the exact destination confirms the lone
+                    // same-number statement on that page. A missing or distant destination stays authoritative.
+                    guard mention.key.kind == .equation, let key = analysis.resolver.resolve(mention.key), key.kind == .theorem,
+                          let point = destination.point, let target = analysis.definitionsByKey[key],
+                          target.pageIndex == destination.pageIndex,
+                          (analysis.definitionsByPage[destination.pageIndex] ?? []).filter({ $0.key.number == key.number }).count == 1,
+                          target.region.rect.insetBy(dx: -40, dy: -40).contains(point) else { return mention }
+                    var resolved = mention; resolved.key = key
+                    return resolved
+                }
                 switch mention.key.kind {
                 case .chapter, .link, .citation: return mention
                 case .section where outline.contains(where: { OutlineMap.numberPrefix(of: $0.title) == mention.key.number }): return mention

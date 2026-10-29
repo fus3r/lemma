@@ -7,11 +7,16 @@ import LemmaCore
 /// count and previous/next. ⌘F shows it (with a short selection as the query), ⌘G and ⇧⌘G move between matches,
 /// Return and ⇧Return too, Escape closes it. Every match is highlighted on the page while it is open; the Search view
 /// (⇧⌘F) remains the place to search the whole library.
+///
+/// Each book keeps its own query. "Theorem 1" in one paper has nothing to do with "Theorem 1" in another, so a search
+/// never follows the reader into another tab: there the field shows that book's own query, and nothing is searched
+/// until the reader asks, so the page stays where they left it.
 @MainActor @Observable
 final class FindController {
     static let shared = FindController()
 
     var isVisible = false
+    /// The query of the current book (`bookID`).
     var query = ""
     var matchCase = false
     /// Keeps only matches that are whole words ("the" without "theorem"); PDFKit has no such option, so the results
@@ -19,7 +24,10 @@ final class FindController {
     var wholeWord = false
     /// Incremented to move the keyboard focus into the field.
     private(set) var focusRequest = 0
-    @ObservationIgnored weak var store: StudyStore?
+    @ObservationIgnored private(set) weak var store: StudyStore?
+    /// The book whose query is in the field, and the queries left in the other books.
+    @ObservationIgnored private var bookID: String?
+    @ObservationIgnored private var queries: [String: String] = [:]
     @ObservationIgnored private var pending: Task<Void, Never>?
     /// The page the current search began on, for Whole Word's filtering.
     @ObservationIgnored private(set) var searchStartPage: Int?
@@ -27,16 +35,30 @@ final class FindController {
     @ObservationIgnored private weak var highlightedView: PDFView?
 
     func show(_ store: StudyStore) {
-        self.store = store
+        attach(store)
         if let selected = store.reader.view?.currentSelection?.string?.trimmingCharacters(in: .whitespacesAndNewlines),
            !selected.isEmpty, selected.count <= 80, !selected.contains("\n") {
             query = selected
             search()
         } else if query.isEmpty, !store.reader.searchText.isEmpty {
+            // This book's own search, from the Search view or Find in this PDF.
             query = store.reader.searchText
+            queryChanged()
         }
         isVisible = true
         focusRequest += 1
+    }
+
+    /// Makes the field this book's: the query left in the previous book stays with it, and this book's own query (or
+    /// none) comes back without a search, so the page does not move.
+    func attach(_ store: StudyStore) {
+        let id = store.workspace?.id
+        guard store !== self.store || id != bookID else { return }
+        if let bookID { queries[bookID] = query.isEmpty ? nil : query }
+        pending?.cancel()
+        clearHighlights()
+        self.store = store; bookID = id
+        query = id.flatMap { queries[$0] } ?? ""
     }
 
     func hide() {
@@ -131,7 +153,11 @@ struct FindWidget: View {
         let reader = store.reader
         HStack(spacing: 2) {
             HStack(spacing: 4) {
-                TextField("", text: $find.query, prompt: Text("Find").foregroundColor(theme[.inputPlaceholderForeground]))
+                // Typing searches; a query put in the field for the reader (another book's, say) does not.
+                TextField("", text: Binding(get: { find.query }, set: { text in
+                    guard text != find.query else { return }
+                    find.query = text; find.queryChanged()
+                }), prompt: Text("Find").foregroundColor(theme[.inputPlaceholderForeground]))
                     .textFieldStyle(.plain).font(.ui(13)).foregroundStyle(theme[.inputForeground])
                     .focused($focused)
                     .onSubmit { find.next() }
@@ -156,8 +182,10 @@ struct FindWidget: View {
                 .font(.ui(12)).monospacedDigit().lineLimit(1)
                 .foregroundStyle(noResults(reader) ? theme[.errorForeground] : theme[.descriptionForeground])
                 .frame(minWidth: 78, alignment: .leading).padding(.leading, 6)
-            VSIconButton(icon: "arrow-up", help: "Previous Match (⇧⌘G)", enabled: !find.query.isEmpty) { find.previous() }
-            VSIconButton(icon: "arrow-down", help: "Next Match (⌘G)", enabled: !find.query.isEmpty) { find.next() }
+            // VS Code's find widget has arrows; the Classic interface steps with chevrons, as its page buttons and Mac find bars do.
+            let classic = ThemeManager.shared.style == .classic
+            VSIconButton(icon: classic ? "chevron-up" : "arrow-up", help: "Previous Match (⇧⌘G)", enabled: !find.query.isEmpty) { find.previous() }
+            VSIconButton(icon: classic ? "chevron-down" : "arrow-down", help: "Next Match (⌘G)", enabled: !find.query.isEmpty) { find.next() }
             VSIconButton(icon: "close", help: "Close (Escape)") { find.hide() }
         }
         .padding(.horizontal, 6).padding(.vertical, 5)
@@ -165,7 +193,6 @@ struct FindWidget: View {
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(theme.border(.editorWidgetBorder), lineWidth: 1))
         .shadow(color: theme[.widgetShadow], radius: 8, y: 2)
         .onKeyPress(.escape) { find.hide(); return .handled }
-        .onChange(of: find.query) { _, _ in find.queryChanged() }
         // On the first ⌘F the field is not in the window yet when this runs: ask for the keyboard once it is.
         .onChange(of: find.focusRequest, initial: true) { _, _ in DispatchQueue.main.async { focused = true } }
         // PDFKit reports matches one by one: highlight the first ones at once, then every few hundred, and all at the end.
@@ -175,7 +202,7 @@ struct FindWidget: View {
             find.applyWholeWord(startPage: find.searchStartPage)
             refreshHighlights()
         }
-        .onChange(of: store.workspace?.id) { _, _ in find.clearHighlights(); if !find.query.isEmpty { find.search() } }
+        .onChange(of: store.workspace?.id) { _, _ in find.attach(store) }
         .onDisappear { find.clearHighlights() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Find")

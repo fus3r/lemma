@@ -73,6 +73,7 @@ enum Codicons {
         "references": "arrow.triangle.branch", "type-hierarchy": "point.3.connected.trianglepath.dotted", "settings-gear": "gearshape",
         "account": "person.crop.circle", "close": "xmark", "chevron-right": "chevron.right", "chevron-down": "chevron.down",
         "chevron-up": "chevron.up", "chevron-left": "chevron.left", "arrow-left": "arrow.left", "arrow-right": "arrow.right",
+        "arrow-up": "arrow.up", "arrow-down": "arrow.down", "arrow-swap": "arrow.left.arrow.right",
         "ellipsis": "ellipsis", "add": "plus", "remove": "minus", "check": "checkmark", "error": "xmark.circle", "warning": "exclamationmark.triangle",
         "info": "info.circle", "question": "questionmark.circle", "bell": "bell", "bell-dot": "bell.badge", "layout-sidebar-left": "sidebar.left",
         "layout-sidebar-right": "sidebar.right", "layout-panel": "rectangle.bottomthird.inset.filled", "layout": "rectangle.3.group",
@@ -113,7 +114,8 @@ enum Codicons {
         "loading": "circle.dotted", "layout-sidebar-left-off": "sidebar.left",
         "layout-sidebar-right-off": "sidebar.right", "layout-panel-off": "rectangle.bottomhalf.inset.filled",
         "debug": "ladybug", "run": "play", "check-all": "checkmark.circle",
-        "file-text": "doc.text", "inbox": "tray"
+        "file-text": "doc.text", "inbox": "tray", "checklist": "checklist", "cloud": "cloud", "globe": "globe",
+        "heart": "heart", "key": "key", "plug": "powerplug"
     ]
 }
 

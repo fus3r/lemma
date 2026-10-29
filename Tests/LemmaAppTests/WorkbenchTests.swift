@@ -76,6 +76,58 @@ final class WorkbenchTests: XCTestCase {
         XCTAssertFalse(store.dropSideTab(["lemma-tab:\(bookID)"], onto: sideIDs[0]))
     }
 
+    /// The find widget's query belongs to its book. Switching tabs searched the other book for it and went to its first
+    /// match there: "regression", found in the book, took the paper from page 1 to its references on page 2.
+    @MainActor
+    func testFindStaysWithItsBookWhenTabsSwitch() async throws {
+        let fixture = try WorkbenchFixture(hosted: true)
+        let find = FindController.shared
+        defer { find.hide(); fixture.close() }
+        let store = fixture.store
+        store.open(fixture.paper); let paperID = try XCTUnwrap(store.workspace?.id)
+        store.open(fixture.book); let bookID = try XCTUnwrap(store.workspace?.id)
+        try await fixture.settle(400)
+        find.show(store)
+        find.query = "regression"; find.search()
+        try await fixture.settle(400)
+        XCTAssertFalse(store.reader.searchResults.isEmpty, "The book has the word.")
+
+        store.activateTab(paperID)
+        try await fixture.settle(400)
+        XCTAssertEqual(store.reader.pageNumber, 1, "The paper stays on its page.")
+        XCTAssertEqual(find.query, "", "The book's query does not follow the reader into the paper.")
+        XCTAssertFalse(store.reader.hasSearched, "Nothing is searched in the paper.")
+
+        store.activateTab(bookID)
+        try await fixture.settle(400)
+        XCTAssertEqual(find.query, "regression", "The book's query comes back with it.")
+        XCTAssertFalse(store.reader.hasSearched, "Coming back searches nothing until the reader asks.")
+        find.next()
+        try await fixture.settle(400)
+        XCTAssertFalse(store.reader.searchResults.isEmpty, "Asking for the next match searches the book again.")
+
+        // A tab change also cancels a query whose typing debounce has not fired yet.
+        find.query = "Least"; find.queryChanged()
+        store.activateTab(paperID)
+        try await fixture.settle(400)
+        XCTAssertEqual(find.query, "")
+        XCTAssertFalse(store.reader.hasSearched, "Pending typing in the book cannot search the paper.")
+        XCTAssertTrue(store.reader.view?.highlightedSelections?.isEmpty ?? true, "The previous book's highlights are cleared.")
+
+        find.hide()
+        store.activateTab(bookID)
+        try await fixture.settle(400)
+        // A selected word intentionally seeds Find; clear the prior search's selected match to test query restoration.
+        let selectedMatch = store.reader.view?.currentSelection
+        store.reader.view?.clearSelection()
+        find.show(store)
+        XCTAssertEqual(find.query, "Least", "Opening Find after switching with it closed restores this book's query.")
+        XCTAssertFalse(store.reader.hasSearched)
+        store.reader.view?.setCurrentSelection(try XCTUnwrap(selectedMatch), animate: false)
+        find.show(store)
+        XCTAssertEqual(find.query, "regression", "An explicitly selected word still seeds Find.")
+    }
+
     @MainActor
     func testWholeBookAnalysisDrivesGoToPrintedPagesAndBreadcrumbs() async throws {
         let fixture = try WorkbenchFixture(hosted: true)
