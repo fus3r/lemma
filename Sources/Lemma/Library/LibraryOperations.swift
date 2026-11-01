@@ -505,7 +505,9 @@ extension StudyStore {
         alert.informativeText = "Lemma stops listing its PDFs here. The files, your notes and reading positions stay on this Mac, and Undo (⌘Z) brings the library back."
         alert.addButton(withTitle: "Remove Library")
         alert.addButton(withTitle: "Cancel")
-        if let window = mainWindow {
+        if var window = mainWindow {
+            // Library Sources is itself a sheet; presenting on its parent queues the alert behind it.
+            while let sheet = window.attachedSheet { window = sheet }
             alert.beginSheetModal(for: window) { [weak self] response in
                 if response == .alertFirstButtonReturn { self?.removeLibraryCollection(id) }
             }

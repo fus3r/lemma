@@ -387,6 +387,51 @@ final class LibraryTreeTests: XCTestCase {
     }
 
     @MainActor
+    func testRemoveLibraryConfirmationAppearsAboveSourcesSheet() async throws {
+        let pdf = try file("Reading.pdf", book: true)
+        let originalPDF = try Data(contentsOf: pdf)
+        let collection = LibraryCollection(id: "reading", title: "Reading", kind: .studying,
+                                           sources: [LibrarySource(path: pdf.path, kind: .file)])
+        let store = try await store([collection])
+        let expected = store.libraries.collections
+        let frame = NSRect(x: 100, y: 100, width: 900, height: 750)
+        let window = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+        let sources = NSWindow(contentRect: frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; sources.isReleasedWhenClosed = false
+        sources.contentView = NSHostingView(rootView: LibrarySourcesSheet(store: store))
+        store.mainWindow = window
+        defer { store.mainWindow = nil; sources.close(); window.close() }
+        window.orderFront(nil)
+        window.beginSheet(sources, completionHandler: nil)
+
+        store.confirmRemoveLibrary(collection.id)
+        try await Task.sleep(for: .milliseconds(150))
+        guard let confirmation = sources.attachedSheet else {
+            XCTFail("Remove Library must present its confirmation above Library Sources, rather than queue it behind that sheet")
+            window.endSheet(sources)
+            try await Task.sleep(for: .milliseconds(100))
+            if let queued = window.attachedSheet { window.endSheet(queued, returnCode: .alertSecondButtonReturn) }
+            try await Task.sleep(for: .milliseconds(100))
+            return
+        }
+        XCTAssertTrue(window.attachedSheet === sources)
+        sources.endSheet(confirmation, returnCode: .alertSecondButtonReturn)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(store.libraries.collections, expected, "Cancel keeps the library")
+
+        store.confirmRemoveLibrary(collection.id)
+        try await Task.sleep(for: .milliseconds(100))
+        let removal = try XCTUnwrap(sources.attachedSheet)
+        sources.endSheet(removal, returnCode: .alertFirstButtonReturn)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(store.libraries.collections.isEmpty)
+        XCTAssertEqual(try LibraryCollectionRepository(root: store.repository.root).load(), [], "The removal is saved")
+        XCTAssertEqual(try Data(contentsOf: pdf), originalPDF, "Removing a library leaves its PDF in place")
+        XCTAssertTrue(window.attachedSheet === sources, "Library Sources stays open")
+        window.endSheet(sources)
+    }
+
+    @MainActor
     func testNewLibrariesRemovalAndTheTrashAreUndoable() async throws {
         let math = root.appendingPathComponent("math")
         let calculus = try file("math/Calculus.pdf")
