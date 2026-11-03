@@ -17,10 +17,10 @@ final class ReferenceFlowTests: XCTestCase {
         let mention = try XCTUnwrap(index.mentions(onPage: 2).first { $0.key == ReferenceKey(kind: .equation, number: "1.1") })
         XCTAssertFalse(mention.isDefinition)
         let point = fixture.point(in: mention, onPage: 2)
-        XCTAssertTrue(view.hitTest(view.convert(point, to: view.superview)) === view, "A citation routes a plain click to Lemma, like a link.")
-
-        view.mouseDown(with: try fixture.event(.leftMouseDown, at: point))
-        view.mouseUp(with: try fixture.event(.leftMouseUp, at: point))
+        // Dispatch an actual click so hitTest sees a mouse event, rather than a prior window/scroll event.
+        fixture.window.orderFront(nil)
+        NSApp.sendEvent(try fixture.event(.leftMouseDown, at: point))
+        NSApp.sendEvent(try fixture.event(.leftMouseUp, at: point))
         let request = try XCTUnwrap(store.referencePeek)
         XCTAssertEqual(request.mention.key.spokenTitle, "Equation (1.1)")
         XCTAssertEqual(request.pageIndex, 2)

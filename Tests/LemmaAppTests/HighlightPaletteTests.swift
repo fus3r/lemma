@@ -45,8 +45,10 @@ final class HighlightPaletteTests: XCTestCase {
             XCTAssertEqual(wells().count, names.count)
         }
         XCTAssertFalse(try trash(at: 0).isEnabled, "The palette must retain one color")
-        let firstRowY = center(try XCTUnwrap(wells().first)).y
-        let save = try XCTUnwrap(descendants(NSButton.self, in: host).filter { center($0).y < firstRowY }.max { center($0).x < center($1).x })
+        // Find Save by its action, independent of the hosting view's coordinate orientation.
+        let buttons = descendants(NSButton.self, in: host)
+        let save = try XCTUnwrap(buttons.first { $0.title == "Save" || $0.keyEquivalent == "\r" },
+                                "Save button among \(buttons.map(\.title))")
         save.performClick(nil)
         try await fixture.settle(80)
         let restored = HighlightPalette(url: store.repository.root.appendingPathComponent("HighlightColors.json"))
