@@ -45,11 +45,11 @@ final class HighlightPaletteTests: XCTestCase {
             XCTAssertEqual(wells().count, names.count)
         }
         XCTAssertFalse(try trash(at: 0).isEnabled, "The palette must retain one color")
-        // Find Save by its action, independent of the hosting view's coordinate orientation.
-        let buttons = descendants(NSButton.self, in: host)
-        let save = try XCTUnwrap(buttons.first { $0.title == "Save" || $0.keyEquivalent == "\r" },
-                                "Save button among \(buttons.map(\.title))")
-        save.performClick(nil)
+        // Use Save's default shortcut: SwiftUI does not expose it as an NSButton on every macOS release.
+        let save = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                                windowNumber: fixture.window.windowNumber, context: nil,
+                                                characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+        XCTAssertTrue(fixture.window.performKeyEquivalent(with: save), "Return activates Save")
         try await fixture.settle(80)
         let restored = HighlightPalette(url: store.repository.root.appendingPathComponent("HighlightColors.json"))
         XCTAssertEqual(restored.settings.colors.map(\.id), ["green"])
