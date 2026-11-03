@@ -27,6 +27,12 @@ Open any mathematics, statistics or computer science PDF. Lemma reads it once, o
 
 **Your work, kept with the source.** Notes, highlights, margin notes and handwriting stay linked to the exact passage. Recall definitions and theorems on a spaced schedule, collect passages from several books into research projects, and export everything: Markdown, Anki decks, Jupyter notebooks, or your annotated edition as a PDF.
 
+**Separate workbenches.** File › New Window (⇧⌘N) opens an empty window, so Economics and CSD can have their own tabs and layout. Windows restore on relaunch and share your library and notes. Even two windows on the same book keep separate reading positions and Find queries. Edit › Undo (⌘Z) and Redo (⇧⌘Z) undo and restore notes, highlights, underlines and handwriting.
+
+**Text and Markdown files.** Choose **File › Add New File…** or the Explorer's new-file button to create a `.txt` or `.md` file without a PDF. Files appear under **Workspace Files**, open in their own tabs and save automatically; ⌘S saves immediately. Markdown has a formatted preview, including mathematics. Closed files stay in the workspace, and open file tabs restore on relaunch. **Reveal File in Finder** opens the actual UTF-8 file.
+
+Click a highlight and choose **Highlight › Remove Highlight**, or right-click it to remove it. Hold Shift and drag from a highlight toward the outside to extend it, or from near either end toward the inside to shorten it. Color rows show a preview; **Add Color…** opens the full macOS color palette, and **Edit Colors & Defaults…** lets you name and edit colors and set the defaults for ⇧⌘H and ⇧⌘U. Saved marks keep their colors when you edit the palette. Removing, resizing and recoloring marks supports Undo and Redo.
+
 **Questions with the right context.** Select a passage and press ⌘K. Lemma assembles the passage, the equations it cites and your notation, shows you the draft, and asks ChatGPT, Codex, Claude Code, or OpenAI, Anthropic or Google with your own API key. Answers return to the note that asked; their algebra can be checked step by step.
 
 **Everything else a reader needs.** Find in the book (⌘F) and search across your whole library, OCR for scanned pages, 45 free textbooks one click away, arXiv search, a minimap of your pages, Paper, Sepia and Night pages, and the choice between a VS Code-style workbench (Lemma's own themes, more than 80 VS Code themes, or any VS Code theme you install) and a classic Mac window.

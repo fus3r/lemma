@@ -73,6 +73,7 @@ private struct CommandCenterBox: View {
     }
 
     private var label: String {
+        if let name = store.activeFileName { return name }
         if let title = store.workspace?.title { return title }
         if case let .project(id)? = store.activeSideEditor, let project = store.project(id) { return project.title }
         return "Lemma"
@@ -155,7 +156,7 @@ enum TrafficLights {
 @MainActor
 final class TitleBarCoordinator {
     static let shared = TitleBarCoordinator()
-    private var observers: [NSObjectProtocol] = []
+    private var observers = NotificationTokens()
     private var watches: [NSKeyValueObservation] = []
     private weak var window: NSWindow?
 
@@ -180,13 +181,12 @@ final class TitleBarCoordinator {
         }
         guard isNewWindow else { return }
         self.window = window
-        for observer in observers { NotificationCenter.default.removeObserver(observer) }
-        observers.removeAll()
+        observers = NotificationTokens()
         let names: [Notification.Name] = [NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification, NSWindow.didExitFullScreenNotification,
                                           NSWindow.didBecomeKeyNotification, NSWindow.didChangeScreenNotification]
         for name in names {
             let endsLiveResize = name == NSWindow.didEndLiveResizeNotification
-            observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self, weak window] _ in
+            observers.add(.default, NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self, weak window] _ in
                 MainActor.assumeIsolated {
                     guard let window else { return }
                     // A size the reader chose is never undone.

@@ -75,6 +75,7 @@ extension StudyStore {
         var note = StudyNote(anchor: anchor, question: StudyNote.quickMarkPrefix, kind: .question)
         note.body = ""
         workspace?.notes.insert(note, at: 0)
+        if let bookID = self.workspace?.id { registerNoteCreationUndo(note, bookID: bookID) }
         reader.selection = nil; reader.hasSelection = false
         reader.view?.clearSelection()
         flush()
@@ -278,6 +279,7 @@ extension StudyStore {
                 : "State \(key.title)\(title.map { " (\($0))" } ?? "") and its hypotheses."
             note.review = ReviewSchedule(dueAt: .now)
             self.workspace?.notes.insert(note, at: 0)
+            if let bookID = self.workspace?.id { registerNoteCreationUndo(note, bookID: bookID) }
             if quietly { return }
             selectedNoteID = note.id
             flush()

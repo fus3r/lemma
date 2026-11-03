@@ -11,7 +11,6 @@ struct ReaderWindow: View {
     @State private var themes = ThemeManager.shared
     @AppStorage(LemmaPreferences.referenceLinks) private var referenceLinks = true
     @AppStorage(LemmaPreferences.referenceCounts) private var referenceCounts = true
-    @AppStorage("panelHeight") private var panelHeight: Double = 240
     @AppStorage("workbench.startupEditor") private var startupEditor = "welcomePage"
     @State private var fullScreen = false
     @Environment(\.openSettings) private var openSettings
@@ -58,13 +57,13 @@ struct ReaderWindow: View {
         .overlay(alignment: .bottomTrailing) { NotificationsOverlay(store: store).padding(.bottom, VSMetrics.statusBarHeight) }
         .ignoresSafeArea(.container, edges: .top)
         .background(WindowReader { window in
-            store.mainWindow = window
-            if let window { TitleBarCoordinator.shared.attach(window); fullScreen = window.styleMask.contains(.fullScreen) }
+            store.attachWindow(window)
+            if let window { store.titleBar.attach(window); fullScreen = window.styleMask.contains(.fullScreen) }
             store.fitWindowToScreen()
         })
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in fullScreen = true }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in fullScreen = false }
-        .navigationTitle(store.workspace?.title ?? "Lemma")
+        .navigationTitle(store.activeDocumentTitle)
     }
 
     private func sheets<Content: View>(_ content: Content) -> some View {
@@ -72,6 +71,8 @@ struct ReaderWindow: View {
             .sheet(isPresented: $store.showQuestion) { QuestionSheet(store: store).environment(\.theme, themes.colors) }
             .sheet(isPresented: $store.showBrowserSetup) { AssistantPane(store: store).environment(\.theme, themes.colors) }
             .sheet(isPresented: $store.showLibrarySources) { LibrarySourcesSheet(store: store).environment(\.theme, themes.colors) }
+            .sheet(isPresented: $store.showHighlightColors) { HighlightColorsSheet(store: store).environment(\.theme, themes.colors) }
+            .sheet(isPresented: $store.showNewFile) { NewWorkspaceFileSheet(store: store).environment(\.theme, themes.colors) }
             .sheet(isPresented: $store.showAcknowledgements) { AcknowledgementsView().environment(\.theme, themes.colors) }
             .sheet(isPresented: $store.showDependencyMap) { DependencyMapPane(store: store).tint(.lemmaOlive) }
             .sheet(isPresented: $store.showShortcuts) { ShortcutsSheet().tint(.lemmaOlive) }
@@ -126,7 +127,7 @@ struct ReaderWindow: View {
             .onChange(of: themes.style) { _, style in
                 // Settings, Welcome and the other editor tabs are the VS Code style's; Classic shows the book.
                 if style == .classic { store.activeSpecial = nil }
-                if let window = store.mainWindow { TitleBarCoordinator.shared.attach(window) }
+                if let window = store.mainWindow { store.titleBar.attach(window) }
             }
             .onChange(of: SessionViewState(store: store)) { _, _ in store.saveWorkbench() }
             .onAppear { themes.startFollowingSystem(); store.applyAppearance() }
@@ -154,25 +155,25 @@ struct ReaderWindow: View {
         GeometryReader { geometry in
             // Room above the panel for the tabs, the breadcrumbs, the passage toolbar (always shown since 2.3.2) and some page.
             let maximumPanel = max(110, geometry.size.height - 180)
-            let fittedPanel = min(panelHeight, maximumPanel)
+            let fittedPanel = min(store.panelHeight, maximumPanel)
             VStack(spacing: 0) {
                 if !(store.panelMaximized && store.showPanel && store.workspace != nil) {
                     VStack(spacing: 0) {
                         // With a book open the tab bar belongs to the first group, so a second group's tabs sit level with it.
-                        if !readingBook, !store.tabs.isEmpty || !store.specialTabs.isEmpty { MainEditorTabs(store: store).tutorialAnchor(.editorTabs) }
+                        if !readingBook, !store.tabs.isEmpty || !store.specialTabs.isEmpty || !store.fileTabs.isEmpty { MainEditorTabs(store: store).tutorialAnchor(.editorTabs) }
                         mainEditor
                     }
                     .frame(maxHeight: .infinity)
                 }
                 if store.showPanel, store.workspace != nil {
                     if !store.panelMaximized {
-                        VSSash(axis: .horizontal, onDrag: { delta in panelHeight = min(maximumPanel, max(110, min(panelHeight, maximumPanel) - delta)) },
-                               onDoubleClick: { panelHeight = min(240, maximumPanel) })
+                        VSSash(axis: .horizontal, onDrag: { delta in store.panelHeight = min(maximumPanel, max(110, min(store.panelHeight, maximumPanel) - delta)) },
+                               onDoubleClick: { store.panelHeight = min(240, maximumPanel) })
                             .accessibilityElement()
                             .accessibilityLabel("Panel height")
                             .accessibilityValue("\(Int(fittedPanel)) points")
                             .accessibilityAdjustableAction { direction in
-                                panelHeight = min(maximumPanel, max(110, fittedPanel + (direction == .increment ? 20 : -20)))
+                                store.panelHeight = min(maximumPanel, max(110, fittedPanel + (direction == .increment ? 20 : -20)))
                             }
                             .help("Drag to resize the panel; double-click to reset its height")
                     }
@@ -186,10 +187,12 @@ struct ReaderWindow: View {
         .onChange(of: store.sideEditors.isEmpty) { _, _ in store.fitPageIfOverflowing() }
     }
 
-    private var readingBook: Bool { store.activeSpecial == nil && store.document != nil && store.workspace != nil }
+    private var readingBook: Bool { store.activeFileName == nil && store.activeSpecial == nil && store.document != nil && store.workspace != nil }
 
     @ViewBuilder private var mainEditor: some View {
-        if let special = store.activeSpecial {
+        if let file = store.activeFile {
+            WorkspaceFileEditor(store: store, file: file)
+        } else if let special = store.activeSpecial {
             SpecialEditorView(store: store, editor: special)
                 .modifier(EditorDropTarget(store: store))
         } else if let document = store.document, let workspace = store.workspace {
@@ -212,7 +215,7 @@ struct ReaderWindow: View {
                     .overlay(alignment: .top) { StickyStatementBar(store: store).padding(.trailing, store.showMinimap ? 110 : 14) }
                     .overlay(alignment: .top) { if store.debug != nil { DebugToolbar(store: store).padding(.top, 8) } }
                     .overlay(alignment: .topTrailing) {
-                        if FindController.shared.isVisible { FindWidget(store: store).padding(.top, 8).padding(.trailing, store.showMinimap ? 118 : 22) }
+                        if store.find.isVisible { FindWidget(store: store).padding(.top, 8).padding(.trailing, store.showMinimap ? 118 : 22) }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // The gutter and minimap draw past their frames while scrolling; keep them off the tab bar.
@@ -274,32 +277,22 @@ struct ReaderWindow: View {
 
     private func selectionActions(labels: Bool) -> some View {
         HStack(spacing: 2) {
-            SelectionAction(icon: "comment-discussion", title: "Ask", help: "Ask an assistant about this passage (⌘K)", labels: labels) { store.prepareQuickAsk() }
-            SelectionAction(icon: "note", title: "Note", help: "New note from the selection (⌘N)", labels: labels) { store.addNote() }
-            SelectionAction(icon: "comment", title: "Comment", help: "Margin note beside this line (⌥⌘M)", labels: labels) { store.addMarginNote() }
-            VSMenu(items: {
-                [.header("Highlight")] + HighlightColor.allCases.map { color in
-                    .action(color.label, enabled: store.reader.hasSelection) { store.highlightSelection(color: color) }
-                } + [.separator, .header("Underline")] + HighlightColor.allCases.map { color in
-                    .action(color.label, enabled: store.reader.hasSelection) { store.highlightSelection(color: color, style: .underline) }
-                }
-            }) {
-                HStack(spacing: 2) {
-                    SelectionActionLabel(icon: "symbol-color", title: "Highlight", labels: true)
-                    Codicon("chevron-down", size: 12).foregroundStyle(themes.colors[.foreground])
-                }
-            }
-            .fixedSize().opacity(store.reader.hasSelection ? 1 : 0.4)
-            .help(store.reader.hasSelection ? "Highlight (⇧⌘H) or underline (⇧⌘U)" : "Select text or capture a region to highlight or underline")
-            .accessibilityLabel("Highlight and underline")
-            SelectionAction(icon: "pin", title: "Pin", help: "Keep this passage in Context (⌥⌘P)", labels: labels) { store.pinSelection() }
-            SelectionAction(icon: "notebook", title: "Lab", help: "Try it in a Python notebook beside the page (⌥⌘L)", labels: labels) { store.sendSelectionToLab() }
-            SelectionAction(icon: "symbol-operator", title: "Derive", help: "Work through it step by step, each line checked (⌥⌘E)", labels: labels) { store.deriveSelection() }
-            SelectionAction(icon: "bracket", title: "LaTeX", help: "Read the formula's LaTeX locally", labels: labels) { store.readSelectedFormula() }
-            SelectionAction(icon: "book", title: "Look Up", help: "The book's index and your glossary (⇧⌘L)", labels: labels) { store.lookupSelection() }
-            SelectionAction(icon: "folder-library", title: "Collect", help: "Collect in the research project (⇧⌘C)", labels: labels) { store.collectSelection() }
-            SelectionAction(icon: "eye", title: "OCR", help: "Recognize this source text locally", labels: labels) { store.prepareOCR(useSelection: true) }
-        }.fixedSize().disabled(!store.reader.hasSelection)
+            Group {
+                SelectionAction(icon: "comment-discussion", title: "Ask", help: "Ask an assistant about this passage (⌘K)", labels: labels) { store.prepareQuickAsk() }
+                SelectionAction(icon: "note", title: "Note", help: "New note from the selection (⌘N)", labels: labels) { store.addNote() }
+                SelectionAction(icon: "comment", title: "Comment", help: "Margin note beside this line (⌥⌘M)", labels: labels) { store.addMarginNote() }
+            }.disabled(!store.reader.hasSelection)
+            HighlightMenu(store: store)
+            Group {
+                SelectionAction(icon: "pin", title: "Pin", help: "Keep this passage in Context (⌥⌘P)", labels: labels) { store.pinSelection() }
+                SelectionAction(icon: "notebook", title: "Lab", help: "Try it in a Python notebook beside the page (⌥⌘L)", labels: labels) { store.sendSelectionToLab() }
+                SelectionAction(icon: "symbol-operator", title: "Derive", help: "Work through it step by step, each line checked (⌥⌘E)", labels: labels) { store.deriveSelection() }
+                SelectionAction(icon: "bracket", title: "LaTeX", help: "Read the formula's LaTeX locally", labels: labels) { store.readSelectedFormula() }
+                SelectionAction(icon: "book", title: "Look Up", help: "The book's index and your glossary (⇧⌘L)", labels: labels) { store.lookupSelection() }
+                SelectionAction(icon: "folder-library", title: "Collect", help: "Collect in the research project (⇧⌘C)", labels: labels) { store.collectSelection() }
+                SelectionAction(icon: "eye", title: "OCR", help: "Recognize this source text locally", labels: labels) { store.prepareOCR(useSelection: true) }
+            }.disabled(!store.reader.hasSelection)
+        }.fixedSize()
     }
 
     @ViewBuilder private var paletteOverlay: some View {

@@ -13,8 +13,6 @@ import LemmaCore
 /// until the reader asks, so the page stays where they left it.
 @MainActor @Observable
 final class FindController {
-    static let shared = FindController()
-
     var isVisible = false
     /// The query of the current book (`bookID`).
     var query = ""
@@ -145,7 +143,7 @@ final class FindController {
 
 struct FindWidget: View {
     @Bindable var store: StudyStore
-    @State private var find = FindController.shared
+    private var find: FindController { store.find }
     @Environment(\.theme) private var theme
     @FocusState private var focused: Bool
 

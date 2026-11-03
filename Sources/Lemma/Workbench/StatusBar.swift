@@ -25,19 +25,25 @@ struct VSStatusBar: View {
             .frame(maxWidth: .infinity)
             .overlay {
                 HStack(spacing: 0) {
-                    ModeIndicator(store: store)
-                    if !empty {
-                        AnalysisStatusItem(store: store)
-                        ProblemsStatusItem(store: store)
-                        DebugStatusItem(store: store)
-                        LabStatusItem(store: store)
-                        FoldedStatusItem(store: store)
+                    if let file = store.activeFile {
+                        StatusItem(icon: file.icon, text: file.id) {}
                     } else {
-                        StatusItem(icon: "lemma", text: "Lemma · an IDE for reading mathematics") { store.openWelcome() }
+                        ModeIndicator(store: store)
+                        if !empty {
+                            AnalysisStatusItem(store: store)
+                            ProblemsStatusItem(store: store)
+                            DebugStatusItem(store: store)
+                            LabStatusItem(store: store)
+                            FoldedStatusItem(store: store)
+                        } else {
+                            StatusItem(icon: "lemma", text: "Lemma · an IDE for reading mathematics") { store.openWelcome() }
+                        }
                     }
                     Spacer(minLength: 8)
                     MessageStatusItem(store: store)
-                    if !empty && store.activeSpecial == nil {
+                    if let file = store.activeFile {
+                        StatusItem(icon: nil, text: file.isMarkdown ? "Markdown · UTF-8" : "Plain Text · UTF-8") {}
+                    } else if !empty && store.activeSpecial == nil {
                         PagePositionStatusItem(store: store)
                         PhysicalPageStatusItem(store: store)
                         ZoomStatusItem(store: store)

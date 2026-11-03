@@ -389,19 +389,5 @@ final class DynamicLibraries {
 @MainActor
 extension StudyStore {
     /// Relink just the source fields; the current PDF, notes, selection and reading position stay in place.
-    func relinkSources(_ sources: [String: LibrarySourceResolution]) {
-        for (id, source) in sources {
-            guard let index = library.firstIndex(where: { $0.id == id }) else { continue }
-            do {
-                let loaded = workspace?.id == id ? workspace : try repository.load(id: id)
-                guard var book = loaded, LibraryPaths.key(book.sourcePath) == LibraryPaths.key(source.originalPath) else { continue }
-                book.sourcePath = source.path; book.sourceBookmark = source.bookmark
-                try repository.save(book)
-                if workspace?.id == id {
-                    workspace?.sourcePath = source.path; workspace?.sourceBookmark = source.bookmark
-                }
-                library[index] = book
-            } catch { self.error = "Could not save the PDF's updated location: \(error.localizedDescription)" }
-        }
-    }
+    func relinkSources(_ sources: [String: LibrarySourceResolution]) { app.relinkSources(sources) }
 }

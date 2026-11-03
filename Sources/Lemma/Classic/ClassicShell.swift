@@ -9,7 +9,6 @@ struct ClassicShell: View {
     @Bindable var store: StudyStore
     @State private var pageInput = "1"
     @FocusState private var pageFocused: Bool
-    @AppStorage("panelHeight") private var panelHeight: Double = 240
     /// The editor column's height, so the panel always leaves room for the page (the height is shared with the VS Code
     /// style, whose limit follows the window).
     @State private var columnHeight: CGFloat = 900
@@ -35,11 +34,11 @@ struct ClassicShell: View {
         }
         .overlay(alignment: .top) { paletteOverlay }
         .background(WindowReader { window in
-            store.mainWindow = window
-            if let window { TitleBarCoordinator.shared.attach(window) }
+            store.attachWindow(window)
+            if let window { store.titleBar.attach(window) }
             store.fitWindowToScreen()
         })
-        .navigationTitle(store.workspace?.title ?? "Lemma")
+        .navigationTitle(store.activeDocumentTitle)
     }
 
     private func toolbar<Content: View>(_ content: Content) -> some View {
@@ -54,7 +53,7 @@ struct ClassicShell: View {
     }
 
     @ViewBuilder private var toolbarActions: some View {
-        if store.document != nil {
+        if store.document != nil && store.activeFileName == nil {
             Toggle(isOn: $store.reader.regionMode) { Label("Capture", systemImage: "viewfinder") }.toggleStyle(.button).help("Draw a source region · ⇧⌘S")
             Toggle(isOn: $store.reader.inkMode) { Label("Draw", systemImage: "pencil.tip") }.toggleStyle(.button).help("Write on My edition · ⌥⇧⌘D")
             Toggle(isOn: $store.reader.rulerMode) { Label("Ruler", systemImage: "text.line.first.and.arrowtriangle.forward") }.toggleStyle(.button)
@@ -89,8 +88,10 @@ struct ClassicShell: View {
     private var editorColumn: some View {
         VStack(spacing: 0) {
             VStack(spacing: 0) {
-                if !store.tabs.isEmpty { ClassicEditorTabBar(store: store).tutorialAnchor(.editorTabs) }
-                if let document = store.document, let workspace = store.workspace {
+                if !store.tabs.isEmpty || !store.fileTabs.isEmpty { ClassicEditorTabBar(store: store).tutorialAnchor(.editorTabs) }
+                if let file = store.activeFile {
+                    WorkspaceFileEditor(store: store, file: file)
+                } else if let document = store.document, let workspace = store.workspace {
                     ClassicBreadcrumbBar(store: store, pageInput: $pageInput, pageFocused: $pageFocused).tutorialAnchor(.breadcrumbs)
                     Divider()
                     if store.reader.rulerMode && !store.reader.regionMode && !store.reader.inkMode && !store.reader.hasSelection { RulerBar(store: store); Divider() }
@@ -106,7 +107,7 @@ struct ClassicShell: View {
                         }
                         .overlay(alignment: .top) { StickyStatementBar(store: store).padding(.trailing, 14) }
                         .overlay(alignment: .top) { if store.debug != nil { DebugToolbar(store: store).padding(.top, 8) } }
-                        .overlay(alignment: .topTrailing) { if FindController.shared.isVisible { FindWidget(store: store).padding(.top, 8).padding(.trailing, 22) } }
+                        .overlay(alignment: .topTrailing) { if store.find.isVisible { FindWidget(store: store).padding(.top, 8).padding(.trailing, 22) } }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .modifier(EditorDropTarget(store: store))
                     } second: {
@@ -124,8 +125,8 @@ struct ClassicShell: View {
             .frame(maxHeight: .infinity)
             if store.showPanel, store.workspace != nil {
                 let maximum = max(110, Double(columnHeight) - 180)
-                ClassicPanelResizeHandle(height: $panelHeight, maximum: maximum)
-                BottomPanel(store: store).frame(height: min(panelHeight, maximum)).tutorialAnchor(.panel)
+                ClassicPanelResizeHandle(height: $store.panelHeight, maximum: maximum)
+                BottomPanel(store: store).frame(height: min(store.panelHeight, maximum)).tutorialAnchor(.panel)
             }
         }
         .background(GeometryReader { geometry in
@@ -170,24 +171,22 @@ struct ClassicShell: View {
 
     private func selectionActions(labels: Bool) -> some View {
         HStack(spacing: 10) {
-            Button { store.prepareQuickAsk() } label: { Label("Ask…", systemImage: "text.bubble").labelStyle(StudyLabelStyle(labels: labels)) }.help("Ask an assistant about this passage · ⌘K")
-            Button(action: store.addNote) { Label("Note", systemImage: "square.and.pencil").labelStyle(StudyLabelStyle(labels: labels)) }.help("New note from the selection · ⌘N")
-            Button { store.collectSelection() } label: { Label("Collect", systemImage: "folder.badge.plus").labelStyle(StudyLabelStyle(labels: labels)) }.help("Collect this passage in the current research project · ⇧⌘C")
-            Button(action: store.addMarginNote) { Label("Comment", systemImage: "note.text").labelStyle(StudyLabelStyle(labels: labels)) }.help("Write a margin note beside this line · ⌥⌘M, or double-click the margin")
-            Menu {
-                ForEach(HighlightColor.allCases, id: \.self) { color in Button(color.label) { store.highlightSelection(color: color) } }
-                Divider()
-                ForEach(HighlightColor.allCases, id: \.self) { color in Button("Underline in \(color.label)") { store.highlightSelection(color: color, style: .underline) } }
-            } label: { Label("Highlight", systemImage: "highlighter") }.menuStyle(.borderlessButton).fixedSize()
-                .help(store.reader.hasSelection ? "Highlight ⇧⌘H or underline ⇧⌘U" : "Select text or capture a region to highlight or underline")
-                .accessibilityLabel("Highlight and underline")
-            Button(action: store.pinSelection) { Label("Pin", systemImage: "pin").labelStyle(StudyLabelStyle(labels: labels)) }.help("Keep this passage in Context · ⌥⌘P")
-            Button(action: store.sendSelectionToLab) { Label("Lab", systemImage: "flask").labelStyle(StudyLabelStyle(labels: labels)) }.help("Try this equation or passage in a Python notebook beside the page · ⌥⌘L")
-            Button(action: store.deriveSelection) { Label("Derive", systemImage: "function").labelStyle(StudyLabelStyle(labels: labels)) }.help("Work through this step by step: each line you write is checked as you type · ⌥⌘E")
-            Button(action: store.readSelectedFormula) { Label("LaTeX", systemImage: "curlybraces").labelStyle(StudyLabelStyle(labels: labels)) }.help("Read the formula's LaTeX locally and compare it with the original")
-            Button(action: store.lookupSelection) { Label("Look up", systemImage: "character.book.closed").labelStyle(StudyLabelStyle(labels: labels)) }.help("The book's index and your glossary · ⇧⌘L or ⌘-click a term")
-            Button { store.prepareOCR(useSelection: true) } label: { Label("OCR…", systemImage: "text.viewfinder").labelStyle(StudyLabelStyle(labels: labels)) }.help("Recognize and review this source text locally")
-        }.fixedSize().disabled(!store.reader.hasSelection)
+            Group {
+                Button { store.prepareQuickAsk() } label: { Label("Ask…", systemImage: "text.bubble").labelStyle(StudyLabelStyle(labels: labels)) }.help("Ask an assistant about this passage · ⌘K")
+                Button(action: store.addNote) { Label("Note", systemImage: "square.and.pencil").labelStyle(StudyLabelStyle(labels: labels)) }.help("New note from the selection · ⌘N")
+                Button { store.collectSelection() } label: { Label("Collect", systemImage: "folder.badge.plus").labelStyle(StudyLabelStyle(labels: labels)) }.help("Collect this passage in the current research project · ⇧⌘C")
+                Button(action: store.addMarginNote) { Label("Comment", systemImage: "note.text").labelStyle(StudyLabelStyle(labels: labels)) }.help("Write a margin note beside this line · ⌥⌘M, or double-click the margin")
+            }.disabled(!store.reader.hasSelection)
+            HighlightMenu(store: store)
+            Group {
+                Button(action: store.pinSelection) { Label("Pin", systemImage: "pin").labelStyle(StudyLabelStyle(labels: labels)) }.help("Keep this passage in Context · ⌥⌘P")
+                Button(action: store.sendSelectionToLab) { Label("Lab", systemImage: "flask").labelStyle(StudyLabelStyle(labels: labels)) }.help("Try this equation or passage in a Python notebook beside the page · ⌥⌘L")
+                Button(action: store.deriveSelection) { Label("Derive", systemImage: "function").labelStyle(StudyLabelStyle(labels: labels)) }.help("Work through this step by step: each line you write is checked as you type · ⌥⌘E")
+                Button(action: store.readSelectedFormula) { Label("LaTeX", systemImage: "curlybraces").labelStyle(StudyLabelStyle(labels: labels)) }.help("Read the formula's LaTeX locally and compare it with the original")
+                Button(action: store.lookupSelection) { Label("Look up", systemImage: "character.book.closed").labelStyle(StudyLabelStyle(labels: labels)) }.help("The book's index and your glossary · ⇧⌘L or ⌘-click a term")
+                Button { store.prepareOCR(useSelection: true) } label: { Label("OCR…", systemImage: "text.viewfinder").labelStyle(StudyLabelStyle(labels: labels)) }.help("Recognize and review this source text locally")
+            }.disabled(!store.reader.hasSelection)
+        }.fixedSize()
     }
 
     @ViewBuilder private var paletteOverlay: some View {
@@ -209,7 +208,7 @@ struct ClassicCommandCenter: View {
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass").font(.system(size: 11))
-            Text(store.workspace.map { "\($0.title) · page, section, (3.41), a term…" } ?? "Go to a book or command…").lineLimit(1)
+            Text(store.activeFileName ?? store.workspace.map { "\($0.title) · page, section, (3.41), a term…" } ?? "Go to a book or command…").lineLimit(1)
             Spacer(minLength: 6)
             Text("⌘P").font(.system(size: 10.5).monospaced()).foregroundStyle(.tertiary)
         }

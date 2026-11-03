@@ -203,16 +203,20 @@ public struct StudyHighlight: Codable, Identifiable, Equatable, Sendable {
     public var regions: [PageRegion]
     public var quote: String
     public var color: HighlightColor
+    /// A custom sRGB color, saved beside the original preset so older versions can still open the workspace.
+    public var colorHex: String?
     public var style: HighlightStyle = .highlight
-    public init(id: UUID = UUID(), pageIndex: Int, regions: [PageRegion], quote: String, color: HighlightColor = .yellow, style: HighlightStyle = .highlight) {
+    public init(id: UUID = UUID(), pageIndex: Int, regions: [PageRegion], quote: String, color: HighlightColor = .yellow, style: HighlightStyle = .highlight, colorHex: String? = nil) {
         self.id = id; self.pageIndex = pageIndex; self.regions = regions; self.quote = quote; self.color = color; self.style = style
+        self.colorHex = colorHex
     }
-    private enum CodingKeys: String, CodingKey { case id, pageIndex, regions, quote, color, style }
+    private enum CodingKeys: String, CodingKey { case id, pageIndex, regions, quote, color, style, colorHex }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(UUID.self, forKey: .id); pageIndex = try c.decode(Int.self, forKey: .pageIndex)
         regions = try c.decode([PageRegion].self, forKey: .regions); quote = try c.decode(String.self, forKey: .quote)
         color = try c.decode(HighlightColor.self, forKey: .color)
+        colorHex = try c.decodeIfPresent(String.self, forKey: .colorHex)
         style = try c.decodeIfPresent(HighlightStyle.self, forKey: .style) ?? .highlight
     }
 }

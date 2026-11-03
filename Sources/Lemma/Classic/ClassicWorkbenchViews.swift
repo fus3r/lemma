@@ -85,7 +85,7 @@ struct ClassicEditorTabBar: View {
                 HStack(spacing: 0) {
                     ForEach(store.tabs) { tab in
                         ClassicEditorTab(title: tab.title, cover: store.library.first { $0.id == tab.id }.flatMap { store.covers.cover(for: $0) },
-                                  selected: tab.id == store.workspace?.id,
+                                  selected: tab.id == store.activeMainTabID,
                                   select: { store.activateTab(tab.id) }, close: { store.closeTab(tab.id) },
                                   closeOthers: { store.closeOtherTabs(keeping: tab.id) },
                                   move: { store.shiftBookTab(tab.id, by: $0) })
@@ -93,12 +93,26 @@ struct ClassicEditorTabBar: View {
                             .dropDestination(for: String.self) { values, _ in store.dropBookTab(values, onto: tab.id) }
                         Divider().frame(height: 18)
                     }
+                    ForEach(store.fileTabs, id: \.self) { name in
+                        HStack(spacing: 7) {
+                            Button { store.openWorkspaceFile(name) } label: {
+                                Label(name, systemImage: "doc.text").font(.system(size: 12, weight: store.activeFileName == name ? .medium : .regular)).lineLimit(1)
+                            }.buttonStyle(.plain)
+                            Button { store.closeWorkspaceFile(name) } label: { Image(systemName: "xmark").font(.system(size: 10)) }
+                                .buttonStyle(.plain).accessibilityLabel("Close \(name)")
+                        }.padding(.horizontal, 12).frame(height: density.tabHeight)
+                        .background(store.activeFileName == name ? Color.primary.opacity(0.07) : .clear)
+                        Divider().frame(height: 18)
+                    }
                 }
             }
             // A tab dropped after the last one goes last.
             .dropDestination(for: String.self) { values, _ in store.dropBookTab(values, onto: nil) }
-            Button(action: store.choosePDF) { Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 28, height: 28) }
-                .buttonStyle(.borderless).help("Open a PDF in a new tab · ⌘O").accessibilityLabel("Open a PDF")
+            Menu {
+                Button("Add New File…") { store.beginNewFile() }
+                Button("Open PDF…", action: store.choosePDF)
+            } label: { Image(systemName: "plus").font(.system(size: 11, weight: .medium)).frame(width: 28, height: 28) }
+                .menuStyle(.borderlessButton).fixedSize().help("Add a file or open a PDF").accessibilityLabel("Add File")
             Spacer(minLength: 0)
         }
         .frame(height: density.tabHeight)
@@ -330,7 +344,9 @@ struct ClassicStatusBar: View {
     var body: some View {
         let mode = mode
         HStack(spacing: 0) {
-            if store.workspace != nil {
+            if let file = store.activeFile {
+                item { Label(file.id, systemImage: "doc.text").lineLimit(1) }
+            } else if store.workspace != nil {
                 item {
                     Label(mode.label, systemImage: mode.symbol).labelStyle(.titleAndIcon)
                 }
@@ -396,7 +412,9 @@ struct ClassicStatusBar: View {
             } else if !store.status.isEmpty {
                 item { Text(store.status).lineLimit(1) }
             }
-            if let workspace = store.workspace {
+            if let file = store.activeFile {
+                item { Text(file.isMarkdown ? "Markdown · UTF-8" : "Plain Text · UTF-8") }
+            } else if let workspace = store.workspace {
                 item {
                     Button { showingReading = true } label: {
                         Label("Today \(ReadingLog.describeShort(store.secondsToday))", systemImage: "clock").lineLimit(1)

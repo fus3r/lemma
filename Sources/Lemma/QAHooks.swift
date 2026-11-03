@@ -14,7 +14,8 @@ final class QAHooks: NSObject {
     /// The video being recorded (videoStart … videoStop).
     static var recorder: QAVideoRecorder?
     let directory: URL
-    weak var store: StudyStore?
+    private weak var app: AppModel?
+    var store: StudyStore? { app?.front }
 
     /// The shipping app (bundle `com.lemma.app`) never listens, whatever its environment: only re-identified QA copies
     /// (`com.lemma.app.qa…`) and unbundled development runs do, so no other process can drive a user's Lemma.
@@ -40,7 +41,7 @@ final class QAHooks: NSObject {
     }
 
     private init(directory: URL, store: StudyStore) {
-        self.directory = directory; self.store = store
+        self.directory = directory; self.app = store.app
         super.init()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
@@ -205,7 +206,7 @@ extension StudyStore {
         state["navigator"] = navigatorSection.rawValue
         state["panel"] = showPanel ? panelTab.rawValue : nil
         state["split"] = split?.title
-        let find = FindController.shared
+        let find = self.find
         state["find"] = ["visible": find.isVisible, "query": find.query, "searched": reader.hasSearched, "results": reader.searchResults.count] as [String: Any]
         state["breadcrumb"] = breadcrumb().map(\.title)
         state["printedPage"] = printedLabel(for: reader.pageNumber - 1)
@@ -284,15 +285,15 @@ extension StudyStore {
         switch action {
         // 3.0 find widget: findShow [query=…] [matchCase=1], findNext, findPrevious, findClose.
         case "findShow":
-            FindController.shared.show(self)
-            if let query = info["query"] { FindController.shared.query = query }
-            if let matchCase = info["matchCase"] { FindController.shared.matchCase = matchCase == "1" }
-            if let wholeWord = info["wholeWord"] { FindController.shared.wholeWord = wholeWord == "1" }
-            if info["query"] != nil || info["matchCase"] != nil || info["wholeWord"] != nil { FindController.shared.search() }
+            find.show(self)
+            if let query = info["query"] { find.query = query }
+            if let matchCase = info["matchCase"] { find.matchCase = matchCase == "1" }
+            if let wholeWord = info["wholeWord"] { find.wholeWord = wholeWord == "1" }
+            if info["query"] != nil || info["matchCase"] != nil || info["wholeWord"] != nil { find.search() }
         case "openSample": openSampleBook()
-        case "findNext": FindController.shared.next()
-        case "findPrevious": FindController.shared.previous()
-        case "findClose": FindController.shared.hide()
+        case "findNext": find.next()
+        case "findPrevious": find.previous()
+        case "findClose": find.hide()
         case "page": if let page = info["page"].flatMap(Int.init) { reader.goToPage(page) }
         case "focus": toggleFocus()
         case "closeBook": closeBook()

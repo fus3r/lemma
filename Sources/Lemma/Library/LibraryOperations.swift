@@ -154,9 +154,9 @@ extension StudyStore {
     func setBookTitle(_ id: String, to title: String) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
-        if workspace?.id == id {
-            workspace?.title = title
-            flush()
+        if let showing = app.windows.first(where: { $0.workspace?.id == id }) {
+            showing.workspace?.title = title
+            showing.flush()
         } else if var book = (try? repository.load(id: id)) ?? library.first(where: { $0.id == id }) {
             book.title = title
             do {
@@ -164,11 +164,13 @@ extension StudyStore {
                 if let index = library.firstIndex(where: { $0.id == id }) { library[index] = book }
             } catch { self.error = "Could not rename the book: \(error.localizedDescription)"; return }
         }
-        for index in tabs.indices where tabs[index].id == id { tabs[index].title = title }
-        for index in sideEditors.indices {
-            if case var .page(state) = sideEditors[index], state.bookID == id { state.title = title; sideEditors[index] = .page(state) }
+        for store in app.windows {
+            for index in store.tabs.indices where store.tabs[index].id == id { store.tabs[index].title = title }
+            for index in store.sideEditors.indices {
+                if case var .page(state) = store.sideEditors[index], state.bookID == id { state.title = title; store.sideEditors[index] = .page(state) }
+            }
+            store.saveWorkbench()
         }
-        saveWorkbench()
     }
 
     /// The name of a PDF in Lemma: a studied book's title, or the name kept for a PDF not opened yet.

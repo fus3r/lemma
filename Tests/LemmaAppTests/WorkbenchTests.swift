@@ -81,7 +81,7 @@ final class WorkbenchTests: XCTestCase {
     @MainActor
     func testFindStaysWithItsBookWhenTabsSwitch() async throws {
         let fixture = try WorkbenchFixture(hosted: true)
-        let find = FindController.shared
+        let find = fixture.store.find
         defer { find.hide(); fixture.close() }
         let store = fixture.store
         store.open(fixture.paper); let paperID = try XCTUnwrap(store.workspace?.id)

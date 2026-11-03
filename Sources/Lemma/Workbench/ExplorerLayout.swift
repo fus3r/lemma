@@ -1,15 +1,16 @@
 import SwiftUI
 
 enum ExplorerPane: String, CaseIterable, Identifiable {
-    case open, library, outline, timeline, pages
+    case open, files, library, outline, timeline, pages
     var id: String { "explorer.\(rawValue)" }
     var title: String {
         switch self {
         case .open: "Open Editors"; case .library: "Library"; case .outline: "Outline"
         case .timeline: "Timeline"; case .pages: "Pages"
+        case .files: "Workspace Files"
         }
     }
-    var initiallyExpanded: Bool { self == .library || self == .outline }
+    var initiallyExpanded: Bool { self == .library || self == .outline || self == .files }
 }
 
 struct SidebarPane: Identifiable {

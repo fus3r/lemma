@@ -26,6 +26,7 @@ extension StudyStore {
                                       region: anchorRegion, quote: quote, imageName: name)
             let note = StudyNote(anchor: anchor, kind: .comment)
             self.workspace?.notes.insert(note, at: 0)
+            registerNoteCreationUndo(note, bookID: workspace.id)
             selectedNoteID = note.id
             reader.view?.clearSelection(); reader.selection = nil; reader.hasSelection = false
             flush()

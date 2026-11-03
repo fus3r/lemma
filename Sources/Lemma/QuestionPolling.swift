@@ -5,9 +5,9 @@ import LemmaCore
 extension StudyStore {
     /// A question sent to an assistant still waits for its answer, in the book in front or in another one.
     var hasPendingQuestion: Bool {
-        if workspace?.notes.contains(where: { $0.pendingRequestID != nil }) == true { return true }
+        if let workspace, collectsResponses(for: workspace.id), workspace.notes.contains(where: { $0.pendingRequestID != nil }) { return true }
         let current = workspace?.id
-        return library.contains { book in book.id != current && book.notes.contains { $0.pendingRequestID != nil } }
+        return library.contains { book in book.id != current && collectsResponses(for: book.id) && book.notes.contains { $0.pendingRequestID != nil } }
     }
 }
 

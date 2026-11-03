@@ -202,6 +202,7 @@ extension StudyStore {
             let anchor = SourceAnchor(pageIndex: request.pageIndex, pageLabel: page.label ?? String(request.pageIndex + 1), region: region, quote: request.quote, imageName: name)
             let note = StudyNote(anchor: anchor, question: question)
             workspace?.notes.insert(note, at: 0)
+            if let bookID = self.workspace?.id { registerNoteCreationUndo(note, bookID: bookID) }
             selectedNoteID = note.id
             if showStudy { studySection = .notes }
             noteQuery = ""; noteFilter = .all

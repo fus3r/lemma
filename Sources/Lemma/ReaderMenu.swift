@@ -11,8 +11,9 @@ enum ReaderContextAction {
     case findMentions(ReferenceKey)
     case ask(ReaderSelection)
     case addNote(NoteKind, ReaderSelection)
-    case highlight(HighlightColor, ReaderSelection)
+    case highlight(HighlightSwatch, ReaderSelection)
     case underline(ReaderSelection)
+    case removeHighlight(UUID)
     case pinSelection(ReaderSelection)
     case lookUp(String, Int, CGRect)
     case bookmark
@@ -48,6 +49,10 @@ extension RegionPDFView {
         guard let controller, let perform = controller.onContextAction, !controller.regionMode, !controller.inkMode else { return menu }
         let point = convert(event.locationInWindow, from: nil)
         var items: [NSMenuItem] = []
+        if let highlight = highlightHit(at: point) {
+            items.append(ActionMenuItem(highlight.style == .underline ? "Remove Underline" : "Remove Highlight") { perform(.removeHighlight(highlight.id)) })
+            items.append(.separator())
+        }
         if let page = page(for: point, nearest: false), let document, let index = controller.references,
            let mention = index.mention(at: convert(point, to: page), onPage: document.index(for: page)) {
             let pageIndex = document.index(for: page)
@@ -69,9 +74,9 @@ extension RegionPDFView {
             notes.submenu = submenu
             items.append(notes)
             let highlight = NSMenuItem(title: "Highlight", action: nil, keyEquivalent: "")
-            let colors = NSMenu()
-            for color in HighlightColor.allCases { colors.addItem(ActionMenuItem(color.label) { perform(.highlight(color, captured)) }) }
-            highlight.submenu = colors
+            highlight.submenu = NativeMenu.make((controller.owner?.app.highlightPalette.settings.colors ?? HighlightColor.allCases.map(HighlightSwatch.init)).map { swatch in
+                .colorAction(swatch.name, color: swatch.nativeColor) { perform(.highlight(swatch, captured)) }
+            })
             items.append(highlight)
             items.append(ActionMenuItem("Underline Selection") { perform(.underline(captured)) })
             items.append(ActionMenuItem("Pin Selection") { perform(.pinSelection(captured)) })
@@ -123,8 +128,9 @@ extension StudyStore {
         case let .findMentions(key): showReferences(to: key)
         case let .ask(selection): restore(selection); prepareQuickAsk()
         case let .addNote(kind, selection): restore(selection); addNote(kind: kind)
-        case let .highlight(color, selection): restore(selection); highlightSelection(color: color)
+        case let .highlight(swatch, selection): restore(selection); highlightSelection(swatch: swatch)
         case let .underline(selection): restore(selection); highlightSelection(style: .underline)
+        case let .removeHighlight(id): removeHighlight(id: id)
         case let .pinSelection(selection): restore(selection); pinSelection()
         case let .lookUp(text, page, rect): lookupDefinition(text, pageIndex: page, region: rect)
         case .bookmark: toggleBookmark()

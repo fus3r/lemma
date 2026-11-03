@@ -21,6 +21,8 @@ final class ReaderController {
     var pageCount = 0
     var hasSelection = false
     var selection: (Int, CGRect, String)?
+    /// The mark most recently clicked, for the Highlight menu's remove and recolor actions.
+    var activeHighlightID: UUID?
     var onReadingChanged: ((Int, Double) -> Void)?
     /// The page layout PDFKit switched to from its own context menu (Single Page… Two Pages Continuous).
     var onLayoutChanged: ((ReadingLayout) -> Void)?
@@ -130,8 +132,6 @@ final class ReaderController {
     var showLineNumbers = UserDefaults.standard.object(forKey: LemmaPreferences.lineNumbers) as? Bool ?? true {
         didSet { UserDefaults.standard.set(showLineNumbers, forKey: LemmaPreferences.lineNumbers); view?.refreshCaptureOverlay() }
     }
-    /// The highlights shown on the page, for the gutter's change bars.
-    @ObservationIgnored var gutterHighlights: [StudyHighlight] = []
 
     /// The line of a page at a height (PDF space), as the status bar's “line 12”.
     func lineIndex(onPage pageIndex: Int, y: CGFloat) -> (index: Int, count: Int)? {
@@ -405,10 +405,6 @@ final class ReaderController {
     func syncHighlights(_ highlights: [StudyHighlight], in document: PDFDocument) {
         let visible = showAnnotations ? highlights : []
         if annotatedDocument === document, appliedHighlights.sharesStorage(with: visible) { return }
-        if !gutterHighlights.sharesStorage(with: visible) {
-            if gutterHighlights != visible { view?.invalidateMarks() }
-            gutterHighlights = visible
-        }
         if annotatedDocument === document, appliedHighlights == visible { appliedHighlights = visible; return }
         if annotatedDocument !== document {
             for annotation in highlightAnnotations.values.joined() { annotation.page?.removeAnnotation(annotation) }
@@ -425,7 +421,7 @@ final class ReaderController {
             for region in highlight.regions {
                 let rect = CGRect(x: region.x, y: region.y, width: region.width, height: region.height)
                 let annotation = PDFAnnotation(bounds: rect, forType: highlight.style == .underline ? .underline : .highlight, withProperties: nil)
-                annotation.color = highlight.style == .underline ? highlight.color.nativeColor.withAlphaComponent(0.95) : highlight.color.nativeColor
+                annotation.color = highlight.style == .underline ? highlight.nativeColor.withAlphaComponent(0.95) : highlight.nativeColor
                 annotation.quadrilateralPoints = [CGPoint(x: 0, y: rect.height), CGPoint(x: rect.width, y: rect.height), .zero, CGPoint(x: rect.width, y: 0)].map { NSValue(point: $0) }
                 annotation.contents = highlight.quote
                 page.addAnnotation(annotation); annotations.append(annotation)
@@ -586,6 +582,7 @@ final class RegionPDFView: PDFView {
     /// The capture rectangle being dragged in region mode, in this view's coordinates.
     private(set) var dragRectangle: CGRect?
     private var drawingStroke: InkStroke?
+    var highlightDrag: HighlightDrag?
     private lazy var selectionOverlay = RegionSelectionOverlay(frame: bounds)
 
     /// A Shift-click with text selected extends the selection, as anywhere on the page, even over a reference.
@@ -609,6 +606,9 @@ final class RegionPDFView: PDFView {
         // AppKit hit-tests for every scroll-wheel event too; only a click needs the margin, the gutter and the references.
         if let event, ![.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) { return target }
         let local = convert(point, from: superview)
+        if event?.type == .leftMouseDown { controller?.activeHighlightID = highlightHit(at: local)?.id }
+        if let event, event.type == .rightMouseDown || (event.type == .leftMouseDown && event.modifierFlags.contains(.shift)),
+           controller?.showAnnotations == true, highlightHit(at: local) != nil { return self }
         // A double-click in the page's margin starts a margin note; PDFKit would otherwise take it.
         if let event, event.type == .leftMouseDown, event.clickCount == 2, event.modifierFlags.isDisjoint(with: [.command, .shift, .option, .control]),
            controller?.onMarginNote != nil, marginLine(at: local) != nil { return self }
@@ -731,6 +731,9 @@ final class RegionPDFView: PDFView {
     }
 
     override func cursorUpdate(with event: NSEvent) {
+        if event.modifierFlags.contains(.shift), highlightHit(at: convert(event.locationInWindow, from: nil)) != nil {
+            NSCursor.resizeLeftRight.set(); return
+        }
         if referenceHit(at: convert(event.locationInWindow, from: nil)) != nil { NSCursor.pointingHand.set() } else { super.cursorUpdate(with: event) }
     }
 
@@ -835,6 +838,8 @@ final class RegionPDFView: PDFView {
     override func mouseDown(with event: NSEvent) {
         hoverPreview.dismiss()
         symbolHover.dismiss()
+        controller?.activeHighlightID = highlightHit(at: convert(event.locationInWindow, from: nil))?.id
+        if beginHighlightExtension(with: event) { return }
         if controller?.regionMode != true, controller?.inkMode != true,
            let hit = selectionOverlay.lineNumberHit(at: convert(event.locationInWindow, from: nil)) {
             window?.makeFirstResponder(self)
@@ -900,6 +905,7 @@ final class RegionPDFView: PDFView {
         updateOverlay()
     }
     override func mouseDragged(with event: NSEvent) {
+        if highlightDrag != nil { updateHighlightExtension(with: event); return }
         if let pending = pendingReference {
             // Dragging from a reference selects text, as it would anywhere else on the page.
             let current = convert(event.locationInWindow, from: nil)
@@ -919,6 +925,7 @@ final class RegionPDFView: PDFView {
         updateOverlay()
     }
     override func mouseUp(with event: NSEvent) {
+        if highlightDrag != nil { finishHighlightExtension(with: event); return }
         // With the ruler on, a click on a line moves the ruler there.
         if let controller, controller.rulerMode, pendingReference == nil, !controller.regionMode, !controller.inkMode, event.clickCount == 1,
            currentSelection?.string?.isEmpty != false {
@@ -1310,7 +1317,7 @@ struct PDFReaderSurface: NSViewRepresentable {
                 } else { view.go(to: page) }
                 controller.updatePage()
             }
-            controller.selection = nil; controller.hasSelection = false
+            controller.selection = nil; controller.hasSelection = false; controller.activeHighlightID = nil
             controller.pageCount = document.pageCount
             controller.pageNumber = min(max(reading.pageIndex + 1, 1), document.pageCount)
         }

@@ -12,6 +12,10 @@ extension StudyStore {
             guard enabled else { return }
             items.append(PaletteItem(id: "command-\(title)", title: title, symbol: symbol, category: "Command", shortcut: shortcut, perform: perform))
         }
+        add("File: New Window", "macwindow", "⇧⌘N") { [self] in app.newWindow() }
+        add("File: Add New File…", "doc.badge.plus", "⌃⌥⌘N") { [self] in beginNewFile() }
+        add("File: Save File", "square.and.arrow.down", "⌘S", when: activeFile != nil) { [self] in saveActiveFile() }
+        add("File: Show Workspace Files in Finder", "folder") { [self] in revealWorkspaceFiles() }
         add("File: Open PDF…", "folder", "⌘O") { [self] in choosePDF() }
         add("Library: Manage Watched Sources…", "folder.badge.gearshape") { [self] in showLibrarySources = true }
         add("Library: Refresh Libraries", "arrow.clockwise") { [self] in libraries.refresh() }

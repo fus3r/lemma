@@ -160,7 +160,7 @@ extension StudyStore {
             let deadline = ContinuousClock.now + timeout
             while let store = self, ContinuousClock.now < deadline {
                 let inFront = store.workspace?.id == id
-                if inFront, store.activeSpecial == nil, let document = store.document, store.reader.view?.document === document {
+                if inFront, store.activeSpecial == nil, store.activeFileName == nil, let document = store.document, store.reader.view?.document === document {
                     action(store); return
                 }
                 // Neither in front nor on its way: the open failed, or the reader chose another book meanwhile.
@@ -201,19 +201,14 @@ extension StudyStore {
     /// Saves, stops notebooks, questions and analysis helpers, and waits for the last writes: quitting, whether or not
     /// the reader window is still open.
     func prepareForTermination() {
-        guard !terminating else { return }
-        terminating = true
-        questions.shutdown()
-        flush()
-        lab.shutdownAll()
-        BookAnalysisModel.terminateHelpers()
-        repository.writer.waitUntilIdle()
+        app.prepareForTermination()
     }
 
     /// Closes the sheets the store presents, so quitting is not held up by one (AppKit does not quit under a sheet).
     func dismissSheets() {
         showQuestion = false; showBrowserSetup = false; showLibrarySources = false; showDependencyMap = false
         showShortcuts = false; showCustomization = false; showReleaseNotes = false; showAcknowledgements = false
+        showHighlightColors = false; showNewFile = false
         ocrCapture = nil; formulaRequest = nil
     }
 

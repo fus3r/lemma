@@ -264,7 +264,7 @@ public struct WorkspaceRepository: Sendable {
         if !workspace.highlights.isEmpty {
             output += "## Highlights\n\n"
             for highlight in workspace.highlights {
-                output += "### PDF page \(highlight.pageIndex + 1) · \(highlight.color.label)\n\n"
+                output += "### PDF page \(highlight.pageIndex + 1) · \(highlight.colorHex ?? highlight.color.label)\n\n"
                 output += highlight.quote.split(separator: "\n", omittingEmptySubsequences: false).map { "> \($0)" }.joined(separator: "\n") + "\n\n"
             }
         }

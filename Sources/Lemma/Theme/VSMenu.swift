@@ -9,11 +9,15 @@ struct VSMenuItem {
     var checked = false
     var enabled = true
     var shortcut: String? = nil
+    var trailingColor: NSColor? = nil
 
     static func action(_ title: String, checked: Bool = false, enabled: Bool = true, shortcut: String? = nil, _ perform: @escaping @MainActor () -> Void) -> VSMenuItem {
         VSMenuItem(title: title, kind: .action(perform), checked: checked, enabled: enabled, shortcut: shortcut)
     }
     static func submenu(_ title: String, _ items: [VSMenuItem]) -> VSMenuItem { VSMenuItem(title: title, kind: .submenu(items)) }
+    static func colorAction(_ title: String, color: NSColor, checked: Bool = false, enabled: Bool = true, _ perform: @escaping @MainActor () -> Void) -> VSMenuItem {
+        VSMenuItem(title: title, kind: .action(perform), checked: checked, enabled: enabled, trailingColor: color)
+    }
     static var separator: VSMenuItem { VSMenuItem(title: "", kind: .separator) }
     static func header(_ title: String) -> VSMenuItem { VSMenuItem(title: title, kind: .header) }
 }
@@ -23,6 +27,7 @@ enum NativeMenu {
     static func make(_ items: [VSMenuItem]) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
+        let colorWidth = max(150, items.filter { $0.trailingColor != nil }.map { ($0.title as NSString).size(withAttributes: [.font: NSFont.menuFont(ofSize: 0)]).width + 40 }.max() ?? 150)
         for item in items {
             switch item.kind {
             case .separator: menu.addItem(.separator())
@@ -37,11 +42,29 @@ enum NativeMenu {
                 let entry = ActionMenuItem(item.title) { perform() }
                 entry.state = item.checked ? .on : .off
                 entry.isEnabled = item.enabled
+                if let color = item.trailingColor { entry.attributedTitle = colorTitle(item.title, color: color, width: colorWidth) }
                 if let shortcut = item.shortcut, let parsed = parse(shortcut) { entry.keyEquivalent = parsed.key; entry.keyEquivalentModifierMask = parsed.modifiers }
                 menu.addItem(entry)
             }
         }
         return menu
+    }
+
+    /// A right-aligned swatch retains native menu highlighting, keyboard navigation and accessibility.
+    private static func colorTitle(_ title: String, color: NSColor, width: CGFloat) -> NSAttributedString {
+        let image = NSImage(size: NSSize(width: 20, height: 12), flipped: false) { rect in
+            let path = NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 2, yRadius: 2)
+            color.withAlphaComponent(1).setFill(); path.fill()
+            NSColor.black.withAlphaComponent(0.25).setStroke(); path.lineWidth = 1; path.stroke()
+            return true
+        }
+        let attachment = NSTextAttachment(); attachment.image = image
+        attachment.bounds = CGRect(x: 0, y: -1, width: 20, height: 12)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.tabStops = [NSTextTab(textAlignment: .right, location: width)]
+        let string = NSMutableAttributedString(string: title + "\t", attributes: [.font: NSFont.menuFont(ofSize: 0), .paragraphStyle: paragraph])
+        string.append(NSAttributedString(attachment: attachment))
+        return string
     }
 
     /// Where a menu opens next to its control: under it; above it (the status bar's, at the bottom of the window); or to

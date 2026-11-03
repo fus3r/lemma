@@ -14,6 +14,7 @@ struct WorkbenchLayout: Codable, Equatable {
     var inspectorWidth: Double = 370
     /// Sizes by pane id throughout the workbench. The existing key keeps older sessions compatible.
     var explorerHeights: [String: Double]? = nil
+    var panelHeight: Double? = nil
 }
 
 /// Editor state belongs to a book, rather than to whichever book happens to be in front.
@@ -29,6 +30,8 @@ struct BookEditorState: Codable {
     /// 2.0: breakpoints and watch expressions of Run and Debug (absent in earlier sessions).
     var breakpoints: [LineBreakpoint]? = nil
     var watch: [String]? = nil
+    /// Each window keeps its own page, zoom and viewport, including when two windows show the same book.
+    var reading: ReadingState? = nil
 }
 
 /// Kept in the library's support folder, so isolated QA copies and other libraries have their own session.
@@ -48,22 +51,33 @@ struct WorkbenchSession: Codable {
     /// 2.0: Welcome, Settings and other special editors open in the main group, and the one in front.
     var specialTabs: [SpecialEditor]? = nil
     var activeSpecial: SpecialEditor? = nil
+    var fileTabs: [String]? = nil
+    var activeFileName: String? = nil
+    /// Library sections and folders are expanded independently in each window.
+    var paneExpanded: [String: Bool]? = nil
 }
 
 @MainActor
 extension StudyStore {
-    var sessionURL: URL { repository.root.appendingPathComponent("workbench.json") }
+    var sessionURL: URL {
+        if windowID == AppModel.primaryWindowID { return repository.root.appendingPathComponent("workbench.json") }
+        return repository.root.appendingPathComponent("Windows/\(windowID.uuidString)/workbench.json")
+    }
 
     func rememberBookEditors() {
         guard let id = workspace?.id else { return }
         workbench.books[id] = BookEditorState(editors: sideEditors, activeEditorID: activeSideEditorID,
             selectedNoteID: selectedNoteID, studySection: studySection, referencesQuery: referencesQuery,
             hierarchyKey: hierarchyKey, hierarchyDirection: hierarchyDirection, inspectorWasHidden: labHidInspector,
-            breakpoints: breakpoints, watch: watchExpressions)
+            breakpoints: breakpoints, watch: watchExpressions, reading: workspace?.reading)
     }
 
     func restoreBookEditors(_ book: StudyWorkspace) {
         guard let saved = workbench.books[book.id] else { labHidInspector = false; breakpoints = []; watchExpressions = []; return }
+        if var reading = saved.reading {
+            reading.pageIndex = max(0, min(reading.pageIndex, (document?.pageCount ?? 1) - 1))
+            workspace?.reading = reading
+        }
         breakpoints = saved.breakpoints ?? []
         watchExpressions = saved.watch ?? []
         sideEditors = saved.editors.filter { editor in
@@ -110,13 +124,21 @@ extension StudyStore {
         if !focusMode { workbench.showLibrary = showLibrary; workbench.showStudy = showStudy; workbench.showPanel = showPanel }
         workbench.panelTab = panelTab; workbench.navigator = navigatorSection
         workbench.specialTabs = specialTabs; workbench.activeSpecial = activeSpecial
+        workbench.fileTabs = fileTabs; workbench.activeFileName = activeFileName
+        workbench.paneExpanded = paneExpanded
         do {
             let data = try sessionEncoder.encode(workbench)
             guard data != lastSessionData else { return }
-            if lastSessionData == nil { try FileManager.default.createDirectory(at: repository.root, withIntermediateDirectories: true) }
+            if lastSessionData == nil { try FileManager.default.createDirectory(at: sessionURL.deletingLastPathComponent(), withIntermediateDirectories: true) }
             try data.write(to: sessionURL, options: .atomic)
             lastSessionData = data
+            app.saveWindows()
         } catch { self.error = "Could not save the editor session: \(error.localizedDescription)" }
+    }
+
+    var panelHeight: Double {
+        get { workbenchLayout.panelHeight ?? (UserDefaults.standard.object(forKey: "panelHeight") as? Double ?? 240) }
+        set { workbenchLayout.panelHeight = newValue; saveWorkbench() }
     }
 
     /// A tab dropped on another takes that tab's place, so a drag to the right lands after the tab dropped on (it landed

@@ -67,7 +67,7 @@ final class MinimapMarkCache {
         if annotations {
             for highlight in highlights {
                 for region in highlight.regions {
-                    marks[highlight.pageIndex, default: []].append(MinimapMark(pageIndex: highlight.pageIndex, rect: region.rect, color: highlight.color.nativeColor.withAlphaComponent(0.85), full: false))
+                    marks[highlight.pageIndex, default: []].append(MinimapMark(pageIndex: highlight.pageIndex, rect: region.rect, color: highlight.nativeColor.withAlphaComponent(0.85), full: false))
                 }
             }
         }

@@ -24,7 +24,7 @@ final class WorkbenchInteractionTests: XCTestCase {
         store.open(fixture.book)
         store.navigatorSection = .library
         store.showLibrary = true
-        store.paneExpanded = ["explorer.open": false, "explorer.library": true, "explorer.outline": true,
+        store.paneExpanded = ["explorer.open": false, "explorer.files": false, "explorer.library": true, "explorer.outline": true,
                               "explorer.timeline": false, "explorer.pages": false]
         try await fixture.settle(350)
         func handles(_ view: NSView) -> [ResizeSashView] {
@@ -111,7 +111,7 @@ final class WorkbenchInteractionTests: XCTestCase {
         let resized = layout.resizing(ExplorerPane.outline.id, ExplorerPane.timeline.id, by: -75)
         XCTAssertEqual(resized["explorer.timeline"], 275)
         XCTAssertEqual(resized["explorer.library"], 26, "Unrelated sections keep their height.")
-        XCTAssertEqual(resized.values.reduce(0, +), 750 - 5 * 22 - 2 * ResizeSashView.thickness)
+        XCTAssertEqual(resized.values.reduce(0, +), 750 - Double(ExplorerPane.allCases.count) * 22 - 2 * ResizeSashView.thickness)
         let nextEvent = layout.resizing(ExplorerPane.outline.id, ExplorerPane.timeline.id, by: -5, using: resized)
         XCTAssertEqual(nextEvent["explorer.timeline"], 280, "Mouse events between two view updates must accumulate.")
 
@@ -121,8 +121,9 @@ final class WorkbenchInteractionTests: XCTestCase {
         XCTAssertEqual(reopened.heights, resized)
 
         let small = explorerLayout(height: 480, expanded: ExplorerPane.allCases, preferred: resized, defaults: defaults)
-        XCTAssertEqual(small.heights.values.reduce(0, +) + 5 * 22 + 4 * ResizeSashView.thickness, 480, accuracy: 0.001)
-        XCTAssertTrue(small.heights.values.allSatisfy { $0 >= 22 }, "All five headers and at least one row stay reachable.")
+        let count = Double(ExplorerPane.allCases.count)
+        XCTAssertEqual(small.heights.values.reduce(0, +) + count * 22 + (count - 1) * ResizeSashView.thickness, 480, accuracy: 0.001)
+        XCTAssertTrue(small.heights.values.allSatisfy { $0 >= 22 }, "All headers and at least one row stay reachable.")
         let clamped = small.resizing(ExplorerPane.outline.id, ExplorerPane.timeline.id, by: 1000)
         XCTAssertEqual(clamped["explorer.timeline"], 22)
     }

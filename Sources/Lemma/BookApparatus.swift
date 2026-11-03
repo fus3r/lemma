@@ -114,6 +114,7 @@ extension StudyStore {
                                       region: target.region, quote: page.selection(for: target.region.rect)?.string ?? "", imageName: name)
             let note = StudyNote(anchor: anchor, question: "Exercise \(number)")
             self.workspace?.notes.insert(note, at: 0)
+            if let bookID = self.workspace?.id { registerNoteCreationUndo(note, bookID: bookID) }
             if let index = self.workspace?.exercises.firstIndex(where: { $0.number == number }) {
                 self.workspace?.exercises[index].noteID = note.id
                 if self.workspace?.exercises[index].status == .todo { self.workspace?.exercises[index].status = .attempted }

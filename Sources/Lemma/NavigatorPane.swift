@@ -183,7 +183,16 @@ struct NavigatorPane: View {
             }.padding(24).frame(width: 360)
         }
     }
-    private var library: some View { LibraryCollectionsView(store: store) }
+    private var library: some View {
+        VStack(spacing: 0) {
+            DisclosureGroup("Workspace Files", isExpanded: store.paneBinding(ExplorerPane.files.id)) {
+                WorkspaceFilesList(store: store).frame(height: store.workspaceFiles.isEmpty ? 95 : 140)
+            }.padding(.horizontal, 12).padding(.vertical, 8)
+            Button("Add New File…") { store.beginNewFile() }.padding(.bottom, 8)
+            Divider()
+            LibraryCollectionsView(store: store)
+        }
+    }
     private var contents: some View {
         Group {
             if store.document == nil { PaneEmptyState(symbol: "list.bullet.indent", title: "The route through a book", message: "Open a PDF to browse its table of contents.") }
@@ -235,9 +244,9 @@ struct NavigatorPane: View {
                             Button { store.reader.goToPage(mark.pageIndex + 1) } label: {
                                 HStack(alignment: .top, spacing: 8) {
                                     if mark.style == .underline {
-                                        Rectangle().fill(Color(nsColor: mark.color.nativeColor).opacity(1)).frame(width: 10, height: 2).padding(.top, 8)
+                                        Rectangle().fill(Color(nsColor: mark.nativeColor).opacity(1)).frame(width: 10, height: 2).padding(.top, 8)
                                     } else {
-                                        Circle().fill(Color(nsColor: mark.color.nativeColor).opacity(1)).frame(width: 8, height: 8).padding(.top, 4)
+                                        Circle().fill(Color(nsColor: mark.nativeColor).opacity(1)).frame(width: 8, height: 8).padding(.top, 4)
                                     }
                                     VStack(alignment: .leading, spacing: 5) {
                                         Text(mark.quote.isEmpty ? "Selected region" : mark.quote).lineLimit(3).font(.callout)

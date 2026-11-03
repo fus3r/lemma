@@ -264,7 +264,7 @@ final class RegionSelectionOverlay: NSView {
     }
 
     /// Numbers beside each line, outside the page when the window leaves room (inside its margin otherwise), and a
-    /// bar where the reader highlighted, noted, marked “?” or drew, like the change bars of an editor's gutter.
+    /// bar where the reader noted, marked “?” or drew, like the change bars of an editor's gutter.
     private func placeLineNumbers(on page: PDFPage, index pageIndex: Int, transform toView: CGAffineTransform, pageRect: CGRect,
                                   controller: ReaderController, into marks: PageMarks) {
         let lines = controller.readingLines(onPage: pageIndex)
@@ -272,9 +272,7 @@ final class RegionSelectionOverlay: NSView {
         let leftRoom = pageRect.minX - bounds.minX, rightRoom = bounds.maxX - pageRect.maxX
         // Bars for the reader's own marks on this page.
         var bars: [(CGRect, NSColor)] = []
-        for highlight in controller.gutterHighlights where highlight.pageIndex == pageIndex {
-            for region in highlight.regions { bars.append((region.rect, highlight.color.nativeColor.withAlphaComponent(0.95))) }
-        }
+        // A highlight already marks its text. Repeating it as a solid gutter bar looked like a stray yellow stroke.
         for note in controller.notes where note.anchor.pageIndex == pageIndex {
             let color: NSColor = note.isQuickMark ? .systemOrange : note.kind == .comment ? MarginNoteStyle.edgeColor : .lemmaOliveOnPage
             bars.append((note.anchor.region.rect, color))

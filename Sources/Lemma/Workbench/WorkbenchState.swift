@@ -40,13 +40,13 @@ extension StudyStore {
     // MARK: Main editor group
 
     /// The id of the tab in front of the main editor group: a book's fingerprint or a special editor's id.
-    var activeMainTabID: String? { activeSpecial?.id ?? workspace?.id }
+    var activeMainTabID: String? { activeFileName.map(Self.fileTabID) ?? activeSpecial?.id ?? workspace?.id }
 
     func openSpecial(_ editor: SpecialEditor) {
         palette = nil
         // The page view goes away behind the editor: keep its exact place now, or a save after it is gone would pair the
         // page reached while scrolling with the position of an earlier page.
-        if activeSpecial == nil, workspace != nil { captureViewport(); scheduleViewportSave() }
+        if activeSpecial == nil, activeFileName == nil, workspace != nil { captureViewport(); scheduleViewportSave() }
         if ThemeManager.shared.style == .classic {
             // The Classic style keeps 1.1's Settings window and sheets.
             switch editor {
@@ -122,12 +122,14 @@ extension StudyStore {
 extension StudyStore {
     /// Brings a main-group tab to the front: a book, or a special editor.
     func activateMainTab(_ id: String) {
+        if let name = fileTabs.first(where: { Self.fileTabID($0) == id }) { openWorkspaceFile(name); return }
         if let special = SpecialEditor.allCases.first(where: { $0.id == id }) { openSpecial(special); return }
-        activeSpecial = nil
+        activeSpecial = nil; activeFileName = nil
         if workspace?.id != id { activateTab(id) } else { saveWorkbench() }
     }
 
     func closeAllEditors() {
+        for name in fileTabs { if !closeWorkspaceFile(name) { return } }
         for editor in sideEditors { closeSideEditor(editor.id) }
         for special in specialTabs { closeSpecial(special) }
         closeAllBooks()
@@ -137,7 +139,7 @@ extension StudyStore {
     func openBookToTheSide(_ id: String) {
         guard let book = workspace.flatMap({ $0.id == id ? $0 : nil }) ?? library.first(where: { $0.id == id }) else { return }
         guard workspace != nil else { reopen(book); return }
-        activeSpecial = nil
+        activeSpecial = nil; activeFileName = nil
         if let editor = sideEditors.first(where: { if case let .page(state) = $0 { state.bookID == id } else { false } }) {
             activateSideEditor(editor.id)
             return

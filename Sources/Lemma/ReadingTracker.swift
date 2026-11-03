@@ -50,6 +50,12 @@ final class ReadingTracker {
 
     func start() { counting = true; updateTimer() }
 
+    /// Side-by-side windows count reading only for the workbench in front.
+    func frontChanged() {
+        updateTimer()
+        if store?.app.front !== store { commit() }
+    }
+
     func stop() { counting = false; updateTimer(); commit() }
 
     /// Whether the timer runs: a book open, Lemma in front, its window visible and the screen awake.
@@ -58,7 +64,7 @@ final class ReadingTracker {
     private func updateTimer() {
         let window = store?.mainWindow
         let visible = window.map { $0.isVisible && !$0.isMiniaturized && $0.occlusionState.contains(.visible) } ?? true
-        let wanted = counting && !asleep && visible && isReaderInFront()
+        let wanted = counting && !asleep && visible && isReaderInFront() && store?.app.front === store
         if wanted, timer == nil {
             // The time away is not reading time.
             lastTick = .now
@@ -86,8 +92,8 @@ final class ReadingTracker {
         lastTick = now
         // The book was closed: nothing to count until another opens (`start`).
         if let store, store.workspace == nil, timer != nil { counting = false; updateTimer(); return }
-        guard let store, let workspace = store.workspace, store.document != nil, elapsed > 0,
-              isReaderInFront(), store.mainWindow?.isVisible != false, store.mainWindow?.isMiniaturized != true,
+        guard let store, store.activeFileName == nil, let workspace = store.workspace, store.document != nil, elapsed > 0,
+              isReaderInFront(), store.app.front === store, store.mainWindow?.isVisible != false, store.mainWindow?.isMiniaturized != true,
               idleSeconds() < Self.idleLimit else { return }
         if pendingWorkspaceID != workspace.id { commit(); pendingWorkspaceID = workspace.id }
         pending[store.reader.focusPageIndex, default: 0] += elapsed

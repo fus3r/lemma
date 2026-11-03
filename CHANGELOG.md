@@ -2,6 +2,19 @@
 
 The detailed notes written for each version before 3.0 are in [docs/HISTORY.md](docs/HISTORY.md).
 
+## Unreleased
+
+## 3.5.0 (November 2026)
+
+- Add standalone text and Markdown files with File › Add New File…, the Explorer and the command palette. Files have their own tabs, automatic saving, ⌘S, Markdown/math preview, Finder access and session restoration in both interface styles. Workspace Files retains closed documents, and windows share live file edits.
+- Fixed a crash when deleting a palette color, including the final row or a default color. Palette rows now use stable color IDs when editing and deleting; the palette retains at least one color.
+- File › New Window (⇧⌘N) opens an empty workbench with independent tabs, layout, reading positions and Find state. Open windows restore on relaunch, existing sessions are preserved, and windows share the library and live annotation edits. The shared app/window separation builds on Songlan Nie's multi-window approach.
+- Creating and deleting notes, highlights and underlines supports native Undo (⌘Z) and Redo (⇧⌘Z), preserving source crops and the original book when tabs change.
+- Highlights no longer add duplicate yellow bars beside line numbers.
+- Remove a highlight from the Highlight menu or its right-click menu. Shift-drag outward to extend it, or inward from either end to shorten it, with Undo and Redo.
+- The Highlight menu shows color previews, saved custom colors from the full macOS color picker, editable palette colors, and separate highlight and underline defaults. Recolor an existing mark by clicking it and choosing a color. Palette changes leave saved marks unchanged; custom colors persist with exported annotations.
+- Remove Library shows its confirmation immediately above Library Sources, so Cancel, removal and Undo work without closing the sources sheet first.
+
 ## 3.4.1 (October 2026)
 
 - Find keeps each book's query when switching tabs, without searching the next book or moving its reading position. Adapted from Songlan Nie's fork.

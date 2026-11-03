@@ -127,12 +127,19 @@ struct MainEditorTabs: View {
                                 .id(editor.id)
                                 .contextMenu { Button("Close") { store.closeSpecial(editor) } }
                         }
+                        ForEach(store.fileTabs, id: \.self) { name in
+                            VSTab(icon: (name as NSString).pathExtension.lowercased() == "md" ? "markdown" : "file-text", title: name,
+                                  active: store.activeFileName == name, dirty: store.app.fileBuffers[name]?.isDirty ?? false,
+                                  select: { store.openWorkspaceFile(name) }, close: { store.closeWorkspaceFile(name) })
+                                .id(StudyStore.fileTabID(name))
+                                .contextMenu { Button("Close") { store.closeWorkspaceFile(name) } }
+                        }
                     }
                     // The tabs scroll only once they fill the bar; its empty part keeps the bar's bottom border and
-                    // opens a PDF on a double-click, as VS Code's opens a new file.
+                    // opens a new workspace file on a double-click, as VS Code does.
                     .frame(minWidth: geometry.size.width, maxHeight: .infinity, alignment: .leading)
                     .background {
-                        Color.clear.contentShape(Rectangle()).onTapGesture(count: 2) { store.choosePDF() }
+                        Color.clear.contentShape(Rectangle()).onTapGesture(count: 2) { store.beginNewFile() }
                             .overlay(alignment: .bottom) { Rectangle().fill(theme.border(.editorGroupHeaderTabsBorder)).frame(height: 1) }
                     }
                 }
@@ -144,7 +151,7 @@ struct MainEditorTabs: View {
                     guard let id else { return }
                     DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) } }
                 }
-                .onChange(of: store.specialTabs.count &+ store.tabs.count) { _, _ in
+                .onChange(of: store.specialTabs.count &+ store.tabs.count &+ store.fileTabs.count) { _, _ in
                     guard let id = store.activeMainTabID else { return }
                     DispatchQueue.main.async { proxy.scrollTo(id) }
                 }
@@ -184,7 +191,7 @@ struct EditorActions: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            if store.document != nil && store.activeSpecial == nil {
+            if store.document != nil && store.activeSpecial == nil && store.activeFileName == nil {
                 if store.debug == nil {
                     VSIconButton(icon: "debug-alt", help: "Debug the Statement in View: step through its proof (F5)", tint: theme[.debugIconStartForeground]) { store.startDebugging() }
                 }

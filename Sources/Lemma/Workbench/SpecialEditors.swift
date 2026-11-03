@@ -239,6 +239,13 @@ struct ReleaseNotesEditor: View {
     @Environment(\.theme) private var theme
 
     private let sections: [(String, String, [String])] = [
+        ("Lemma 3.5: windows and workspace files", "files", [
+            "File › New Window (⇧⌘N) opens an empty workbench with its own tabs, layout, reading positions and Find queries. Windows restore on relaunch and share your library and annotation edits. Thanks to Songlan Nie for the multi-window approach.",
+            "File › Add New File… creates text and Markdown files without a PDF. Files have their own tabs, automatic saving, ⌘S, Markdown and math preview, and a Workspace Files list for reopening them.",
+            "Undo and Redo restore notes, highlights, underlines and handwriting. Remove a highlight from its menu, or Shift-drag its ends to resize it.",
+            "Choose custom highlight colors, edit your palette, and set separate highlight and underline defaults. Deleting a palette color no longer crashes; existing marks keep their colors.",
+            "Remove Library shows its confirmation above Library Sources as soon as you ask."
+        ]),
         ("Lemma 3.4.1: keep your place", "check", [
             "Find keeps each book's query without searching or moving its page when you switch tabs. Classic Find shows previous and next chevrons. Thanks to Songlan Nie.",
             "Tabs keep their width while you resize the Explorer, and dragging a tab right can move it to the last position.",
@@ -319,7 +326,7 @@ struct ReleaseNotesEditor: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("What’s New in Lemma \(WelcomeEditor.version)").font(.system(size: 30, weight: .semibold, design: .serif))
                             .foregroundStyle(theme[.foreground])
-                        Text("October 2026 · Updates since the first public release").font(.ui(13)).foregroundStyle(theme[.descriptionForeground])
+                        Text("November 2026 · Updates since the first public release").font(.ui(13)).foregroundStyle(theme[.descriptionForeground])
                     }
                 }
                 ForEach(sections, id: \.0) { section in

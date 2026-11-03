@@ -39,7 +39,7 @@ struct ShortcutsSheet: View {
                  ("⇧↩", "Run the cell and go to the next one"), ("⌘↩", "Run the cell"), ("⌥↩", "Run the cell and add one below"),
                  ("⇥  ⇧⇥", "Indent · Dedent the selected lines"), ("⌘/", "Comment or uncomment lines (in a cell)"), ("esc", "Leave the cell")]),
         ("Review", [("⇧⌘R", "Open Review"), ("⌘↩", "Reveal the source and your saved work"), ("⌘1 – ⌘4", "Grade: Again, Hard, Good, Easy")]),
-        ("Files", [("⌘O", "Open a PDF in a new tab"), ("⌥⇧⌘E", "Export study notes"), ("⌘,", "Settings")])
+        ("Files", [("⇧⌘N", "New empty window"), ("⌘O", "Open a PDF in a new tab"), ("⌥⇧⌘E", "Export study notes"), ("⌘,", "Settings")])
     ]
 
     var body: some View {

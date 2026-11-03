@@ -126,11 +126,11 @@ extension StudyStore {
     /// page at once would move the book still on screen).
     func openBook(_ id: String, atPage pageIndex: Int) {
         guard let item = library.first(where: { $0.id == id }) else { return }
-        if workspace?.id == id, activeSpecial == nil, let view = reader.view, view.document === document, view.window != nil {
+        if workspace?.id == id, activeSpecial == nil, activeFileName == nil, let view = reader.view, view.document === document, view.window != nil {
             reader.goToPage(pageIndex + 1)
             return
         }
-        if workspace?.id == id { activeSpecial = nil } else { reopen(item) }
+        if workspace?.id == id { activeSpecial = nil; activeFileName = nil } else { reopen(item) }
         guard workspace?.id == id else { return }
         workspace?.reading.pageIndex = pageIndex
         workspace?.reading.positionX = nil; workspace?.reading.positionY = nil

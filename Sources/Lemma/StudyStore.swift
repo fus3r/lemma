@@ -6,6 +6,14 @@ import Observation
 
 @MainActor @Observable
 final class StudyStore {
+    let app: AppModel
+    let windowID: UUID
+    @ObservationIgnored var hasWindow = false
+    @ObservationIgnored var windowRequested = false
+    @ObservationIgnored var windowFrame: CGRect?
+    @ObservationIgnored let fallbackUndoManager: UndoManager = { let manager = UndoManager(); manager.groupsByEvent = false; return manager }()
+    @ObservationIgnored let find = FindController()
+    @ObservationIgnored let titleBar = TitleBarCoordinator()
     let repository: WorkspaceRepository
     let mailbox: BrowserMailbox
     let questions: QuestionRuntime
@@ -14,19 +22,52 @@ final class StudyStore {
     /// The Library tree's selection, keyboard cursor, names being typed and drag feedback.
     @ObservationIgnored let libraryTree = LibraryTreeState()
     var showLibrarySources = false
+    var showHighlightColors = false
+    var showNewFile = false
+    var addHighlightColor = false
     var showAcknowledgements = false
     var reader = ReaderController()
-    var library: [StudyWorkspace] = []
-    var workspace: StudyWorkspace?
+    var library: [StudyWorkspace] {
+        get { app.library }
+        set { app.library = newValue }
+        _modify { yield &app.library }
+    }
+    private var workspaceBuffer: WorkspaceBuffer?
+    private var windowReading: ReadingState?
+    var workspace: StudyWorkspace? {
+        get {
+            guard var book = workspaceBuffer?.book else { return nil }
+            if let windowReading { book.reading = windowReading }
+            return book
+        }
+        set {
+            guard let book = newValue else { workspaceBuffer = nil; windowReading = nil; return }
+            let buffer = app.buffer(for: book)
+            var content = book
+            // Scrolling one window must neither move another window nor redraw its notebook.
+            content.reading = buffer.book.reading
+            if buffer.book != content { buffer.book = content }
+            if workspaceBuffer !== buffer { workspaceBuffer = buffer }
+            if windowReading != book.reading { windowReading = book.reading }
+        }
+    }
     /// Multi-book research and the durable editor session live alongside the per-PDF workspaces.
-    var projects: [ResearchProject] = []
+    var projects: [ResearchProject] {
+        get { app.projects }
+        set { app.projects = newValue }
+        _modify { yield &app.projects }
+    }
     var selectedProjectID: UUID?
     var projectQuery = ""
     var showCustomization = false
     /// Editors that are not books, open as tabs in the main editor group (Welcome, Settings, Keyboard Shortcuts…).
     var specialTabs: [SpecialEditor] = []
     /// The special editor in front of the book, if any.
-    var activeSpecial: SpecialEditor?
+    var activeSpecial: SpecialEditor? {
+        didSet { if activeSpecial != nil { activeFileName = nil } }
+    }
+    var fileTabs: [String] = []
+    var activeFileName: String?
     /// Page miniatures beside the page, as an editor's minimap.
     var showMinimap = UserDefaults.standard.object(forKey: "editor.minimap.enabled") as? Bool ?? true {
         didSet { UserDefaults.standard.set(showMinimap, forKey: "editor.minimap.enabled") }
@@ -48,14 +89,17 @@ final class StudyStore {
     var debug: ProofDebugSession?
     /// Which panes of the side bar views are open (“OUTLINE”, “TIMELINE”…).
     var paneExpanded: [String: Bool] = (UserDefaults.standard.dictionary(forKey: "workbench.panes") as? [String: Bool]) ?? [:] {
-        didSet { UserDefaults.standard.set(paneExpanded, forKey: "workbench.panes") }
+        didSet {
+            if windowID == AppModel.primaryWindowID { UserDefaults.standard.set(paneExpanded, forKey: "workbench.panes") }
+            if restored { saveWorkbench() }
+        }
     }
     /// The panel fills the editor area (VS Code's Maximize Panel Size).
     var panelMaximized = false
     /// What's New, as a sheet in the Classic style.
     var showReleaseNotes = false
     /// Full-text search across the library (the VS Code style's Search view).
-    @ObservationIgnored lazy var librarySearch = LibraryTextSearch(cacheFolder: repository.root.appendingPathComponent("Indexes", isDirectory: true))
+    var librarySearch: LibraryTextSearch { app.librarySearch }
     /// Outline entries the reader opened; the path to the reading position opens by itself while `outlineFollows`.
     var outlineExpanded: Set<String> = []
     /// Lines the reader marked to stop at while debugging a proof (F9), in this book.
@@ -72,9 +116,9 @@ final class StudyStore {
     @ObservationIgnored var workbench = WorkbenchSession()
     @ObservationIgnored var hasSavedSession = false
     @ObservationIgnored var sessionWritable = true
-    @ObservationIgnored var projectsWritable = true
-    @ObservationIgnored var projectsDirty = false
-    @ObservationIgnored var projectSaveTask: Task<Void, Never>?
+    var projectsWritable: Bool { app.projectsWritable }
+    var projectsDirty: Bool { get { app.projectsDirty } set { app.projectsDirty = newValue } }
+    var projectSaveTask: Task<Void, Never>? { get { app.projectSaveTask } set { app.projectSaveTask = newValue } }
     var document: PDFDocument?
     var selectedNoteID: UUID?
     var error: String?
@@ -114,7 +158,7 @@ final class StudyStore {
     /// Bumped when the page theme changes, so views drawn over the page refresh.
     var pageThemeRevision = 0
     /// Books, papers and cited works the reader asked to download.
-    let downloads = PDFDownloads()
+    let downloads: PDFDownloads
     var catalogMode = CatalogMode.books
     var arxivQuery = ""
     var arxivSort = ArxivSort.relevance
@@ -149,9 +193,9 @@ final class StudyStore {
     @ObservationIgnored var readingStatementCache: (key: String, value: ReadingStatement?)?
     @ObservationIgnored var pageTextMaps: [String: PageTextMap] = [:]
     /// Terms and index entries of the other books in the library, for Look Up across books.
-    @ObservationIgnored let libraryGlossary = LibraryGlossary()
+    @ObservationIgnored let libraryGlossary: LibraryGlossary
     /// Python notebooks: interpreters and one kernel per running notebook.
-    @ObservationIgnored let lab = LabRuntime()
+    @ObservationIgnored let lab: LabRuntime
     /// Set when opening a notebook hid the inspector to make room; closing the notebook shows it again.
     @ObservationIgnored var labHidInspector = false
     /// Reading time per page and day, while the reader window is in use.
@@ -232,12 +276,12 @@ final class StudyStore {
     /// workbench.json stays pretty-printed: it is small and people read it.
     @ObservationIgnored let sessionEncoder: JSONEncoder = { let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]; return encoder }()
     /// Saved books that could not be read at launch: their files are kept, and their tabs stay in the saved session.
-    @ObservationIgnored var unreadableWorkspaces: [WorkspaceLoadFailure] = []
+    var unreadableWorkspaces: [WorkspaceLoadFailure] { app.unreadableWorkspaces }
     @ObservationIgnored var preservedTabIDs: [String] = []
     /// Passwords of locked PDFs opened in this session, by fingerprint; never written anywhere.
-    @ObservationIgnored var passwords: [String: String] = [:]
+    var passwords: [String: String] { get { app.passwords } set { app.passwords = newValue } }
     /// Books opened with a password: the analysis helper cannot read them, so they are not sent to it.
-    @ObservationIgnored var lockedFingerprints: Set<String> = []
+    var lockedFingerprints: Set<String> { get { app.lockedFingerprints } set { app.lockedFingerprints = newValue } }
     /// Replaces the password dialog, for tests: the file's name and whether a password was just refused.
     @ObservationIgnored var passwordPrompt: ((String, Bool) -> String?)?
     /// Open tabs' documents, least recently shown first: only the book in front and a few others stay in memory.
@@ -250,29 +294,17 @@ final class StudyStore {
     @ObservationIgnored var explanationSummaries: [UUID: ExplanationSummary] = [:]
     @ObservationIgnored var terminating = false
 
-    init(root supportRoot: URL? = nil) {
-        let root = supportRoot ?? ProcessInfo.processInfo.environment["LEMMA_SUPPORT_DIR"].map { URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? WorkspaceRepository.defaultRoot
-        repository = WorkspaceRepository(root: root)
-        mailbox = BrowserMailbox(root: root)
-        questions = QuestionRuntime(root: root.appendingPathComponent("Assistants", isDirectory: true))
-        covers = LibraryCovers(root: root)
-        fingerprints = FingerprintCache(root: root)
-        let newLibrarySources = !FileManager.default.fileExists(atPath: root.appendingPathComponent("Libraries.json").path)
-        libraries = DynamicLibraries(root: root, defaults: LibraryCollection.publicDefaults(support: root))
-        do {
-            // Each workspace is decoded once (the library sources above read the same, now cached, files).
-            let listing = try repository.listing()
-            library = listing.workspaces
-            unreadableWorkspaces = listing.failures
-            if !listing.failures.isEmpty { self.error = Self.unreadableMessage(listing.failures) }
-        } catch {
-            // Without the library, saving the session would forget every open tab: keep the saved one as it is.
-            sessionWritable = false
-            self.error = "Could not read the study library: \(error.localizedDescription)"
-        }
-        do { projects = try ProjectRepository(root: root).load() }
-        catch { projectsWritable = false; self.error = "Could not read the projects. Their saved file has been kept: \(error.localizedDescription)" }
+    convenience init(root supportRoot: URL? = nil) { self.init(app: AppModel(root: supportRoot)) }
+
+    init(app: AppModel, windowID: UUID = AppModel.primaryWindowID) {
+        self.app = app; self.windowID = windowID
+        repository = app.repository; mailbox = app.mailbox; questions = app.questions
+        covers = app.covers; fingerprints = app.fingerprints; libraries = app.libraries
+        lab = app.lab; downloads = app.downloads; libraryGlossary = app.libraryGlossary
+        sessionWritable = app.libraryReadable
+        error = app.startupError
+        // Only the original window reads the legacy openTabs/lastWorkspaceID defaults. Every new window starts empty.
+        hasSavedSession = windowID != AppModel.primaryWindowID
         if FileManager.default.fileExists(atPath: sessionURL.path) {
             do {
                 let data = try Data(contentsOf: sessionURL)
@@ -283,7 +315,7 @@ final class StudyStore {
         }
         // The earlier one-book list could be only one row tall. Make the new collection tree visible once,
         // when its sources are first installed; subsequent user resizing remains fully persistent.
-        if newLibrarySources, libraries.collections.count > 1,
+        if app.newLibrarySources, libraries.collections.count > 1,
            (workbench.layout.explorerHeights?[ExplorerPane.library.id] ?? 220) < 120 {
             var heights = workbench.layout.explorerHeights ?? [:]
             heights[ExplorerPane.library.id] = 220
@@ -308,8 +340,8 @@ final class StudyStore {
         }
         saveTimer.action = { [weak self] in self?.save(wait: false) }
         reader.onSelectNote = { [weak self] id in self?.selectNote(id) }
-        reader.onInk = { [weak self] stroke in self?.addInk(stroke, undoManager: self?.reader.view?.undoManager) }
-        reader.onEraseInk = { [weak self] id in self?.removeInk(id: id, undoManager: self?.reader.view?.undoManager) }
+        reader.onInk = { [weak self] stroke in self?.addInk(stroke, undoManager: self?.pdfUndoManager) }
+        reader.onEraseInk = { [weak self] id in self?.removeInk(id: id, undoManager: self?.pdfUndoManager) }
         reader.onLookup = { [weak self] page, region, text in self?.lookupDefinition(text, pageIndex: page, region: region) }
         reader.onReference = { [weak self] mention, page, keep in self?.peekReference(mention, pageIndex: page, keep: keep) }
         reader.onReferenceToSide = { [weak self] mention, page in self?.openReferenceToSide(mention, pageIndex: page) }
@@ -327,9 +359,7 @@ final class StudyStore {
             guard let self, let workspace = self.workspace else { return nil }
             return self.lab.image(named: name, workspaceID: workspace.id, repository: self.repository)
         }
-        libraries.sourcesResolved = { [weak self] sources in self?.relinkSources(sources) }
-        // Library scans take the studied books from memory rather than decoding every workspace again.
-        libraries.workspaceReferences = { [weak self] in self?.library.map(LibraryWorkspaceRef.init) ?? [] }
+        app.register(self)
     }
 
     var currentNote: StudyNote? { workspace?.notes.first { $0.id == selectedNoteID } }
@@ -435,9 +465,9 @@ final class StudyStore {
                 guard loaded.pageCount > 0 else { throw CocoaError(.fileReadCorruptFile) }
                 pdf = loaded
             }
-            let current = self.workspace?.id == id ? self.workspace : nil
+            let current = self.workspace?.id == id ? self.workspace : app.currentWorkspace(id)
             // An unreadable workspace file throws here rather than being replaced by an empty one.
-            var onDisk = current == nil ? try repository.load(id: id) : savedSnapshot
+            var onDisk = self.workspace?.id != id ? try repository.load(id: id) : savedSnapshot
             var carried: (pages: Int?, title: String)?
             var workspace: StudyWorkspace
             if let current { workspace = current }
@@ -591,7 +621,7 @@ final class StudyStore {
         rememberBookEditors()
         // A debug session belongs to the book it was started in; the book opened comes to the front of the editor.
         if debug != nil { stopDebugging() }
-        activeSpecial = nil
+        activeSpecial = nil; activeFileName = nil
         let projectEditor: UUID? = if case let .project(id)? = activeSideEditor { id } else { nil }
         if labHidInspector && !showStudy { showStudy = true }
         self.workspace = workspace
@@ -645,7 +675,7 @@ final class StudyStore {
         // Written in the background: a reopened book usually changes only its reading position and the time it was opened.
         save(wait: false)
         saveTabs()
-        UserDefaults.standard.set(workspace.id, forKey: "lastWorkspaceID")
+        if windowID == AppModel.primaryWindowID { UserDefaults.standard.set(workspace.id, forKey: "lastWorkspaceID") }
         tracker?.start()
     }
 
@@ -674,11 +704,11 @@ final class StudyStore {
     /// Brings an open book to the front: from memory when its document is still loaded, by opening its file otherwise.
     @discardableResult
     func activateBook(_ id: String, quiet: Bool = false, then: ((Bool) -> Void)? = nil) -> OpenOutcome {
-        guard workspace?.id != id else { activeSpecial = nil; then?(true); return .opened }
+        guard workspace?.id != id else { activeSpecial = nil; activeFileName = nil; saveWorkbench(); then?(true); return .opened }
         if let pdf = documents[id] {
             flush()
             // The saved workspace is decoded again only if its file changed since it was last read or saved.
-            if let saved = (try? repository.load(id: id)) ?? library.first(where: { $0.id == id }) {
+            if let saved = app.currentWorkspace(id) ?? (try? repository.load(id: id)) ?? library.first(where: { $0.id == id }) {
                 var workspace = saved
                 workspace.lastOpenedAt = .now
                 present(workspace, document: pdf, onDisk: saved)
@@ -795,10 +825,13 @@ final class StudyStore {
         if let projectEditor { showSideEditor(.project(projectEditor)) }
         status = ""; browserStatus = ""
         if !keepingSideBar, navigatorSection != .search { navigatorSection = .library }
-        UserDefaults.standard.removeObject(forKey: "lastWorkspaceID")
+        if windowID == AppModel.primaryWindowID { UserDefaults.standard.removeObject(forKey: "lastWorkspaceID") }
     }
 
-    private func saveTabs() { UserDefaults.standard.set(tabs.map(\.id), forKey: "openTabs"); saveWorkbench() }
+    private func saveTabs() {
+        if windowID == AppModel.primaryWindowID { UserDefaults.standard.set(tabs.map(\.id), forKey: "openTabs") }
+        saveWorkbench()
+    }
 
     func reopen(_ item: StudyWorkspace) { reopenBook(item) }
 
@@ -820,17 +853,20 @@ final class StudyStore {
         guard !restoreStarted else { return }
         restoreStarted = true
         // Quitting saves and stops helpers even once this window is closed, and works while a sheet is shown.
-        AppLifecycle.shared.attach(self)
+        AppLifecycle.shared.attach(app)
         PageThemeState.shared.theme = pageTheme
         // Reopening the book saves its session, including clearing any special editor in front.
         let savedActiveSpecial = workbench.activeSpecial
+        let savedActiveFile = workbench.activeFileName
         if hasSavedSession {
             workbenchLayout = workbench.layout; selectedProjectID = workbench.projectID
+            if let expanded = workbench.paneExpanded { paneExpanded = expanded }
             showLibrary = workbench.showLibrary; showStudy = workbench.showStudy; showPanel = workbench.showPanel
             panelTab = workbench.panelTab; navigatorSection = workbench.navigator
             sideEditors = workbench.homeEditors.filter { if case let .project(id) = $0 { projects.contains { $0.id == id && !$0.archived } } else { false } }
             activeSideEditorID = workbench.activeHomeEditorID
             specialTabs = workbench.specialTabs ?? []
+            fileTabs = workbench.fileTabs ?? []
         }
         // Tabs from the last session come back without loading their documents until they are shown. A book whose
         // workspace could not be read keeps its place in the saved session, for when its file is readable again.
@@ -841,7 +877,7 @@ final class StudyStore {
             library.first { $0.id == id }.map { BookTab(id: id, title: $0.title) }
         }
         let args = CommandLine.arguments
-        if let index = args.firstIndex(of: "--open"), args.indices.contains(index + 1) {
+        if windowID == AppModel.primaryWindowID, let index = args.firstIndex(of: "--open"), args.indices.contains(index + 1) {
             let page = args.firstIndex(of: "--page").flatMap { args.indices.contains($0 + 1) ? Int(args[$0 + 1]) : nil }
             openFile(URL(fileURLWithPath: args[index + 1])) { [weak self] opened in
                 guard opened, let self, let page else { return }
@@ -857,10 +893,11 @@ final class StudyStore {
             activeSpecial = special
             saveWorkbench()
         }
+        if let name = savedActiveFile, fileTabs.contains(name) { openWorkspaceFile(name) }
         restored = true
         let requested = pendingFileOpens; pendingFileOpens = []
         for url in requested { open(url) }
-        if workspace == nil, activeSpecial == nil, openingFile == nil, (UserDefaults.standard.string(forKey: "workbench.startupEditor") ?? "welcomePage") == "welcomePage" {
+        if workspace == nil, activeSpecial == nil, activeFileName == nil, openingFile == nil, (UserDefaults.standard.string(forKey: "workbench.startupEditor") ?? "welcomePage") == "welcomePage" {
             openSpecial(.welcome)
         }
         if let message = error { error = nil; notify(message, severity: .error) }
@@ -884,6 +921,7 @@ final class StudyStore {
             let title = kind.isGlossary ? String(anchor.quote.replacingOccurrences(of: "\n", with: " ").prefix(100)) : ""
             let note = StudyNote(anchor: anchor, question: title, kind: kind)
             workspace?.notes.insert(note, at: 0)
+            if let bookID = workspace?.id { registerNoteCreationUndo(note, bookID: bookID) }
             selectedNoteID = note.id
             revealStudy(); studySection = kind.isGlossary ? .glossary : .notes
             noteQuery = ""; noteFilter = .all
@@ -932,7 +970,10 @@ final class StudyStore {
             var note = StudyNote(id: capture.id, anchor: anchor)
             note.sourceTextOrigin = .ocr
             if let index = workspace?.notes.firstIndex(where: { $0.id == note.id }) { workspace?.notes[index] = note }
-            else { workspace?.notes.insert(note, at: 0) }
+            else {
+                workspace?.notes.insert(note, at: 0)
+                registerNoteCreationUndo(note, bookID: capture.workspaceID)
+            }
             selectedNoteID = note.id
             revealStudy(); studySection = .notes; noteQuery = ""; noteFilter = .all
             flush()
@@ -998,31 +1039,6 @@ final class StudyStore {
         workspace?.pins.append(ContextPin(label: note.title, anchor: note.anchor))
         flush(); status = "Reference pinned."
     }
-    func removeNote(id: UUID, undoManager: UndoManager?) {
-        guard let workspaceID = workspace?.id, let index = workspace?.notes.firstIndex(where: { $0.id == id }), let note = workspace?.notes[index] else { return }
-        let links = workspace?.noteLinks.filter { $0.sourceNoteID == id || $0.targetNoteID == id } ?? []
-        workspace?.noteLinks.removeAll { $0.sourceNoteID == id || $0.targetNoteID == id }
-        workspace?.notes.remove(at: index)
-        if selectedNoteID == id { selectedNoteID = workspace?.notes.first?.id }
-        undoManager?.registerUndo(withTarget: self) { target in
-            MainActor.assumeIsolated {
-                guard target.workspace?.id == workspaceID else { return }
-                let insertionIndex = min(index, target.workspace?.notes.count ?? 0)
-                target.workspace?.notes.insert(note, at: insertionIndex)
-                let noteIDs = Set(target.workspace?.notes.map(\.id) ?? [])
-                target.workspace?.noteLinks.append(contentsOf: links.filter { noteIDs.contains($0.sourceNoteID) && noteIDs.contains($0.targetNoteID) })
-                undoManager?.registerUndo(withTarget: target) { redoTarget in
-                    MainActor.assumeIsolated {
-                        guard redoTarget.workspace?.id == workspaceID else { return }
-                        redoTarget.removeNote(id: id, undoManager: undoManager)
-                    }
-                }
-                target.selectedNoteID = id; target.flush()
-            }
-        }
-        undoManager?.setActionName("Delete Note")
-        flush()
-    }
     func recordReview(id: UUID, understood: Bool) { grade(id: id, understood ? .good : .again) }
 
     /// Schedules the next recall from the reader's own grade.
@@ -1064,15 +1080,21 @@ final class StudyStore {
         workspace?.bookmarks[index].title = title; scheduleSave()
     }
     func removeBookmark(id: UUID) { workspace?.bookmarks.removeAll { $0.id == id }; flush() }
-    func highlightSelection(color: HighlightColor = .yellow, style: HighlightStyle = .highlight) {
+    func highlightSelection(color: HighlightColor? = nil, style: HighlightStyle = .highlight) {
+        highlightSelection(swatch: color.map(HighlightSwatch.init) ?? app.highlightPalette.defaultColor(for: style), style: style)
+    }
+
+    func highlightSelection(swatch: HighlightSwatch, style: HighlightStyle = .highlight) {
         guard let (index, rectangle, quote) = reader.selection, let page = document?.page(at: index) else { return }
         let lines = reader.regionMode ? [rectangle] : (reader.view?.currentSelection?.selectionsByLine().map { $0.bounds(for: page) } ?? [rectangle])
         let regions = lines.filter { !$0.isEmpty && !$0.isNull }.map { PageRegion(x: $0.minX, y: $0.minY, width: $0.width, height: $0.height) }
         guard !regions.isEmpty else { return }
-        workspace?.highlights.append(StudyHighlight(pageIndex: index, regions: regions, quote: quote, color: style == .underline && color == .yellow ? .blue : color, style: style))
+        let highlight = StudyHighlight(pageIndex: index, regions: regions, quote: quote, color: swatch.color, style: style, colorHex: swatch.hex)
+        workspace?.highlights.append(highlight)
+        if let bookID = workspace?.id { registerHighlightCreationUndo(highlight, bookID: bookID) }
+        reader.activeHighlightID = highlight.id
         flush(); status = style == .underline ? "Underline saved." : "Highlight saved."
     }
-    func removeHighlight(id: UUID) { workspace?.highlights.removeAll { $0.id == id }; flush() }
     func updateLayout(_ layout: ReadingLayout) { workspace?.reading.layout = layout; scheduleSave() }
     func lookupSelection() {
         if let (page, region, text) = reader.selection, reader.hasSelection {
@@ -1203,6 +1225,7 @@ final class StudyStore {
     /// `wait` returns once everything queued is on disk and reports a failure at once.
     func save(wait: Bool) {
         saveTimer.cancel()
+        for file in app.fileBuffers.values { file.save(in: workspaceFileRepository) }
         flushProjects()
         captureViewport()
         saveWorkbench()
@@ -1416,7 +1439,7 @@ final class StudyStore {
     func pollBrowser() {
         // A response belongs to its original book, even while the reader studies another tab.
         let books = (workspace.map { [$0] } ?? []) + library.filter { $0.id != workspace?.id && $0.notes.contains { $0.pendingRequestID != nil } }
-        for book in books {
+        for book in books where collectsResponses(for: book.id) {
         for note in book.notes {
             guard let id = note.pendingRequestID else { continue }
             do {
@@ -1433,7 +1456,7 @@ final class StudyStore {
                 browserStatus = result.message ?? result.status.capitalized
                 guard ["complete", "error"].contains(result.status) else { lastResults[id] = signature; continue }
                 let packet = try? mailbox.packet(id, maximumAge: .infinity)
-                var updated = workspace?.id == book.id ? workspace! : (try repository.load(id: book.id) ?? book)
+                var updated = try workspace?.id == book.id ? workspace! : (app.currentWorkspace(book.id) ?? repository.load(id: book.id) ?? book)
                 guard let index = updated.notes.firstIndex(where: { $0.id == note.id && $0.pendingRequestID == id }) else { continue }
                 if result.status == "complete", let answer = result.answer, !answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     updated.notes[index].explanation = SavedExplanation(body: answer, conversationURL: result.conversationURL, provider: packet?.provider ?? .chatGPTWeb, model: result.model)

@@ -38,7 +38,8 @@ struct VSSideBar: View {
     @ViewBuilder private func titleActions(_ container: ViewContainer) -> some View {
         switch container {
         case .explorer:
-            VSIconButton(icon: "new-file", help: "Open PDF… (⌘O)") { store.choosePDF() }
+            VSIconButton(icon: "new-file", help: "Add New File… (⌃⌥⌘N)") { store.beginNewFile() }
+            VSIconButton(icon: "folder-opened", help: "Open PDF… (⌘O)") { store.choosePDF() }
             VSIconButton(icon: "new-folder", help: "New Research Project") { store.newProject() }
             VSIconButton(icon: "collapse-all", help: "Collapse Outline") { store.outlineExpanded = [] }
         case .search:
@@ -69,7 +70,8 @@ struct VSSideBar: View {
             VSIconButton(icon: "folder-opened", help: "Open PDF… (⌘O)") { store.choosePDF() }
         }
         VSMenuButton(icon: "ellipsis", help: "Views and More Actions…") {
-            var items: [VSMenuItem] = [.action("Open PDF…", shortcut: "⌘O") { store.choosePDF() }]
+            var items: [VSMenuItem] = [.action("Add New File…", shortcut: "⌃⌥⌘N") { store.beginNewFile() },
+                                     .action("Open PDF…", shortcut: "⌘O") { store.choosePDF() }]
             if let book = store.workspace {
                 items += [.action("Reveal Source in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: book.sourcePath)]) },
                           .action("Export Study Notes…") { store.exportNotes() },
@@ -91,12 +93,13 @@ struct VSSideBar: View {
 struct ExplorerView: View {
     @Bindable var store: StudyStore
 
-    private var openCount: Int { store.tabs.count + store.specialTabs.count + store.sideEditors.count }
+    private var openCount: Int { store.tabs.count + store.fileTabs.count + store.specialTabs.count + store.sideEditors.count }
     private var panes: [SidebarPane] {
         ExplorerPane.allCases.map { pane in
             let height: Double
             switch pane {
             case .open: height = min(Double(max(openCount, 1)) * 22 + (store.sideEditors.isEmpty ? 0 : 22), 220)
+            case .files: height = store.workspaceFiles.isEmpty ? 90 : min(Double(store.workspaceFiles.count) * 22, 180)
             case .library: height = store.libraries.collections.isEmpty ? 110 : 220
             case .outline: height = 22
             case .timeline: height = 200
@@ -104,13 +107,16 @@ struct ExplorerView: View {
             }
             return SidebarPane(id: pane.id, title: pane == .outline ? store.workspace.map { "Outline · \($0.title)" } ?? "Outline" : pane.title,
                                initiallyExpanded: pane.initiallyExpanded, preferredHeight: height,
-                               count: pane == .open ? openCount : pane == .library ? store.libraryPDFCount : nil)
+                               count: pane == .open ? openCount : pane == .files ? store.workspaceFiles.count : pane == .library ? store.libraryPDFCount : nil)
         }
     }
     var body: some View {
         ResizableSidebarPanes(store: store, panes: panes, fill: ExplorerPane.outline.id) { pane in
             switch pane.id {
             case ExplorerPane.open.id: VSIconButton(icon: "close-all", help: "Close All Editors", size: 16) { store.closeAllEditors() }
+            case ExplorerPane.files.id:
+                VSIconButton(icon: "new-file", help: "Add New File…", size: 16) { store.beginNewFile() }
+                VSIconButton(icon: "folder-opened", help: "Show Workspace Files in Finder", size: 16) { store.revealWorkspaceFiles() }
             case ExplorerPane.library.id:
                 VSIconButton(icon: "new-folder", help: "New Library…", size: 16) { store.beginNewLibrary() }
                 VSIconButton(icon: "refresh", help: "Refresh Libraries", size: 16) { store.libraries.refresh() }
@@ -122,6 +128,7 @@ struct ExplorerView: View {
         } content: { pane in
             switch pane.id {
             case ExplorerPane.open.id: OpenEditorsList(store: store)
+            case ExplorerPane.files.id: WorkspaceFilesList(store: store)
             case ExplorerPane.library.id: LibraryCollectionsView(store: store)
             case ExplorerPane.outline.id: OutlineTree(store: store)
             case ExplorerPane.timeline.id: TimelineList(store: store)
@@ -150,6 +157,10 @@ struct OpenEditorsList: View {
                 ForEach(store.specialTabs) { editor in
                     editorRow(icon: editor.icon, title: editor.title, description: "", selected: store.activeSpecial == editor,
                               select: { store.openSpecial(editor) }, close: { store.closeSpecial(editor) })
+                }
+                ForEach(store.fileTabs, id: \.self) { name in
+                    editorRow(icon: (name as NSString).pathExtension.lowercased() == "md" ? "markdown" : "file-text", title: name, description: "",
+                              selected: store.activeFileName == name, select: { store.openWorkspaceFile(name) }, close: { store.closeWorkspaceFile(name) })
                 }
                 if !store.sideEditors.isEmpty {
                     groupHeader("Group 2")

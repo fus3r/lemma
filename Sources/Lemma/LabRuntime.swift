@@ -419,6 +419,7 @@ extension StudyStore {
                                  body: "```python\n\(cell.source)\n```\n\n```\n\(trace)\n```")
             note.kind = .question
             self.workspace?.notes.insert(note, at: 0)
+            if let bookID = self.workspace?.id { registerNoteCreationUndo(note, bookID: bookID) }
             selectedNoteID = note.id
             flush()
             let label = notebook.source.map { "\($0.label) (\(pageText($0.pageIndex)))" } ?? notebook.title
@@ -452,6 +453,9 @@ extension StudyStore {
     /// they gather it in their session and write it once when the cell ends.
     func updateLab(_ id: UUID, workspaceID: String? = nil, save: Bool = true, _ edit: (inout LabNotebook) -> Void) {
         let owner = workspaceID ?? workspace?.id
+        if let owner, owner != workspace?.id, let showing = app.windows.first(where: { $0.workspace?.id == owner }) {
+            showing.updateLab(id, workspaceID: owner, save: save, edit); return
+        }
         if owner == workspace?.id, let index = workspace?.labs.firstIndex(where: { $0.id == id }) {
             edit(&workspace!.labs[index])
             workspace!.labs[index].updatedAt = .now
@@ -961,6 +965,7 @@ extension StudyStore {
             var note = StudyNote(anchor: anchor, question: notebook.title, body: "Figure from the Lab notebook “\(notebook.title)”.", kind: .comment)
             note.figureName = figure
             self.workspace?.notes.insert(note, at: 0)
+            if let bookID = self.workspace?.id { registerNoteCreationUndo(note, bookID: bookID) }
             flush()
             if !saveFailed { status = "Figure pinned beside \(shortPageText(pageIndex)). It shows as a card in the margin of a wide window." }
         } catch { self.error = "Could not pin the figure: \(error.localizedDescription)" }
