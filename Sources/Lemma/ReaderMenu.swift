@@ -46,6 +46,12 @@ extension RegionPDFView {
     override func menu(for event: NSEvent) -> NSMenu? {
         let captured: ReaderSelection? = controller?.hasSelection == true ? controller?.selection.map { ($0.0, $0.1, $0.2) } : nil
         let menu = super.menu(for: event) ?? NSMenu()
+        if let controller, let shape = shapeHit(at: convert(event.locationInWindow, from: nil)) {
+            menu.insertItem(.separator(), at: 0)
+            menu.insertItem(ActionMenuItem("Delete \(shape.kind.label)") { controller.owner?.removeShape(id: shape.id) }, at: 0)
+            menu.insertItem(ActionMenuItem("Edit \(shape.kind.label)") { controller.selectShape(shape) }, at: 0)
+            return menu
+        }
         guard let controller, let perform = controller.onContextAction, !controller.regionMode, !controller.inkMode else { return menu }
         let point = convert(event.locationInWindow, from: nil)
         var items: [NSMenuItem] = []

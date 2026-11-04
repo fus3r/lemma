@@ -7,7 +7,7 @@ struct StudyPane: View {
     @Environment(\.undoManager) private var undoManager
     @State private var inspectedImage: StudyImagePreview?
     @State private var comparison: StudyComparison?
-    @State private var previewReasoning = false
+    @State private var previewReasoning = true
     @State private var editExplanation = false
     @State private var showAssumptions = false
     @State private var showRecall = false
@@ -96,7 +96,7 @@ struct StudyPane: View {
         .onChange(of: store.noteQuery) { _, _ in selectVisibleNoteIfNeeded() }
         .onChange(of: store.noteFilter) { _, _ in selectVisibleNoteIfNeeded() }
         .onChange(of: store.studySection) { _, section in if section == .notes || section == .glossary { selectVisibleNoteIfNeeded() } }
-        .onChange(of: store.selectedNoteID) { _, _ in editExplanation = false; showAssumptions = false; showRecall = false }
+        .onChange(of: store.selectedNoteID) { _, _ in previewReasoning = true; editExplanation = false; showAssumptions = false; showRecall = false }
     }
     private var notes: some View {
         // Filtered and sorted once per redraw: typing in a note redraws the pane on every keystroke.
@@ -228,8 +228,12 @@ struct StudyPane: View {
                     Text(note.kind == .definition || note.kind == .notation ? "My understanding" : "My reasoning").font(.headline)
                     Spacer()
                     Button(previewReasoning ? "Edit" : "Preview") { previewReasoning.toggle() }.workbenchLinkStyle().font(.caption)
+                        .accessibilityIdentifier("note.reasoning.mode")
                 }
-                if previewReasoning && !note.body.isEmpty { MathPreview(text: note.body) }
+                if previewReasoning {
+                    if note.body.isEmpty { Text("No reasoning yet. Choose Edit to add your notes.").font(.callout).foregroundStyle(.secondary) }
+                    else { MathPreview(text: note.body) }
+                }
                 else {
                     TextEditor(text: binding(note, \.body)).font(.body).frame(minHeight: 110, maxHeight: 230).scrollContentBackground(.hidden)
                         .padding(6).workbenchInputBox().accessibilityLabel("My reasoning")

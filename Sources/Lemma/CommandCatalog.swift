@@ -138,6 +138,11 @@ extension StudyStore {
         add("Study: Look Up Definition…", "character.book.closed", "⇧⌘L", when: book) { [self] in lookupSelection() }
         add(reader.regionMode ? "Study: Stop Capturing" : "Study: Capture a Region", "viewfinder", "⇧⌘S", when: book) { [self] in reader.regionMode.toggle() }
         add(reader.inkMode ? "Study: Stop Drawing" : "Study: Draw on My Edition", "pencil.tip", "⌥⇧⌘D", when: book) { [self] in reader.inkMode.toggle() }
+        for kind in PageShapeKind.allCases {
+            add("Study: Draw \(kind.label)", kind.symbol, when: book) { [self] in
+                reader.inkMode = true; reader.drawingTool = DrawingTool(rawValue: kind.rawValue) ?? .rectangle
+            }
+        }
         add("Study: Review Notes", "arrow.clockwise", "⇧⌘R", when: book) { [self] in revealStudy(); studySection = .review }
         add("Study: Recognize Text on This Page…", "text.viewfinder", "⇧⌘O", when: book) { [self] in prepareOCR(useSelection: false) }
         add("Study: Dependencies & References…", "point.3.connected.trianglepath.dotted", when: currentNote != nil) { [self] in showDependencyMap = true }

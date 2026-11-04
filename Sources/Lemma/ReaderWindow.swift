@@ -205,7 +205,7 @@ struct ReaderWindow: View {
                     else { selectionBar.tutorialAnchor(.selectionBar) }
                     HStack(spacing: 0) {
                         PDFReaderSurface(document: document, reading: workspace.reading, controller: store.reader, regionMode: store.reader.regionMode,
-                            notes: workspace.notes, highlights: workspace.highlights, inkStrokes: workspace.inkStrokes, selectedNoteID: store.selectedNoteID,
+                            notes: workspace.notes, highlights: workspace.highlights, inkStrokes: workspace.inkStrokes, shapes: workspace.shapes, selectedNoteID: store.selectedNoteID,
                             showAnnotations: store.reader.showAnnotations, recallMask: store.reader.recallMask,
                             foldedProofs: Set(workspace.foldedProofs), understood: Set(workspace.understood))
                             .tutorialAnchor(.page)
@@ -238,24 +238,12 @@ struct ReaderWindow: View {
         }
     }
 
-    private var selectionBar: some View {
+    @ViewBuilder private var selectionBar: some View {
+        if store.reader.inkMode {
+            AnnotationToolbox(store: store)
+        } else {
         let theme = themes.colors
-        return HStack(spacing: 10) {
-            if store.reader.inkMode {
-                Picker("Drawing tool", selection: $store.reader.inkEraser) {
-                    Label("Pen", systemImage: "pencil.tip").tag(false); Label("Eraser", systemImage: "eraser").tag(true)
-                }.pickerStyle(.segmented).frame(width: 150).labelsHidden()
-                if !store.reader.inkEraser {
-                    Picker("Ink color", selection: $store.reader.inkColor) {
-                        ForEach(InkColor.allCases, id: \.self) { color in Text(color.label).tag(color) }
-                    }.labelsHidden().fixedSize()
-                    Picker("Pen width", selection: $store.reader.inkWidth) {
-                        Text("Fine").tag(1.5); Text("Medium").tag(3.0); Text("Broad").tag(5.0)
-                    }.labelsHidden().fixedSize()
-                }
-                Spacer(minLength: 0)
-                VSIconButton(icon: "close", help: "Finish Drawing") { store.reader.inkMode = false }
-            } else {
+        HStack(spacing: 10) {
                 Codicon(store.reader.regionMode ? "inspect" : "selection", size: 16).foregroundStyle(theme.accent)
                 Text(store.reader.hasSelection ? (store.reader.regionMode ? "Region selected" : "Text selected") : (store.reader.regionMode ? "Drag around an equation or passage" : "Select text to highlight or annotate")).font(.ui(12)).foregroundStyle(theme[.descriptionForeground]).lineLimit(1)
                     .layoutPriority(-1)
@@ -265,7 +253,6 @@ struct ReaderWindow: View {
                     selectionActions(labels: false)
                 }
                 if store.reader.regionMode { VSIconButton(icon: "close", help: "Return to Text Selection") { store.reader.regionMode = false } }
-            }
         }
         .font(.ui(12))
         .buttonStyle(.borderless)
@@ -273,6 +260,7 @@ struct ReaderWindow: View {
         .background(theme[.editorWidgetBackground])
         .vsBorder(.bottom, .editorWidgetBorder, theme: theme)
         .vsBorder(.top, .editorGroupHeaderTabsBorder, theme: theme)
+        }
     }
 
     private func selectionActions(labels: Bool) -> some View {

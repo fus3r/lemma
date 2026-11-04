@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import LemmaCore
 
 @main
 struct LemmaApp: App {
@@ -125,7 +126,14 @@ private struct LemmaCommands: Commands {
         }
         CommandMenu("Study") {
             Toggle("Draw a Region", isOn: Bindable(store).reader.regionMode).keyboardShortcut("s", modifiers: [.command, .shift])
-            Toggle("Handwritten Annotations", isOn: Bindable(store).reader.inkMode).keyboardShortcut("d", modifiers: [.command, .shift, .option])
+            Toggle("PDF Annotation Toolbox", isOn: Bindable(store).reader.inkMode).keyboardShortcut("d", modifiers: [.command, .shift, .option]).disabled(store.document == nil)
+            Menu("Draw Shape") {
+                ForEach(PageShapeKind.allCases, id: \.self) { kind in
+                    Button { store.reader.inkMode = true; store.reader.drawingTool = DrawingTool(rawValue: kind.rawValue) ?? .rectangle } label: {
+                        Label(kind.label, systemImage: kind.symbol)
+                    }
+                }
+            }.disabled(store.document == nil)
             Toggle("Reading Ruler", isOn: Bindable(store).reader.rulerMode).keyboardShortcut("r", modifiers: [.command, .option]).disabled(store.document == nil)
             Button("Pin Selection", action: store.pinSelection).keyboardShortcut("p", modifiers: [.command, .option]).disabled(!store.reader.hasSelection)
             Button("Ask About Selection…", action: store.prepareQuickAsk).keyboardShortcut("k").disabled(!store.reader.hasSelection)

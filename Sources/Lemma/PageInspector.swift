@@ -220,14 +220,15 @@ struct PageInspector: View {
         let notes = (store.workspace?.notes ?? []).filter { $0.anchor.pageIndex == pageIndex }
         let highlights = (store.workspace?.highlights ?? []).filter { $0.pageIndex == pageIndex }
         let labs = (store.workspace?.labs ?? []).filter { $0.source?.pageIndex == pageIndex }
+        let shapes = (store.workspace?.shapes ?? []).filter { $0.pageIndex == pageIndex }
         let bookmarked = store.workspace?.bookmarks.contains { $0.pageIndex == pageIndex } == true
-        if notes.isEmpty && highlights.isEmpty && labs.isEmpty && !bookmarked {
+        if notes.isEmpty && highlights.isEmpty && labs.isEmpty && shapes.isEmpty && !bookmarked {
             section("Your work", count: 0) {
                 Text("Nothing yet on this page. Select a passage to ask, note, mark or try it in the Lab; double-click the margin to write beside a line.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         } else {
-            section("Your work", count: notes.count + highlights.count + labs.count) {
+            section("Your work", count: notes.count + highlights.count + labs.count + shapes.count) {
                 if bookmarked { row(symbol: "bookmark.fill", title: "Bookmarked", detail: nil, trailing: nil) { store.reveal(.bookmarks) } }
                 ForEach(notes) { note in
                     HStack(spacing: 4) {
@@ -254,6 +255,17 @@ struct PageInspector: View {
                 }
                 ForEach(labs) { notebook in
                     row(symbol: "flask", title: notebook.title, detail: "\(notebook.cells.count) cells", trailing: nil) { store.openLabNotebook(notebook.id) }
+                }
+                ForEach(shapes) { shape in
+                    HStack(spacing: 4) {
+                        row(symbol: shape.kind.symbol, title: shape.kind.label, detail: "\(shape.width.formatted()) pt\(shape.dashed ? " · dashed" : "")", trailing: nil) {
+                            store.reader.goToPage(shape.pageIndex + 1)
+                            store.reader.selectShape(shape)
+                        }
+                        Button(role: .destructive) { store.removeShape(id: shape.id) } label: { Image(systemName: "trash").frame(width: 24, height: 24) }
+                            .buttonStyle(.plain).help("Delete \(shape.kind.label.lowercased()) · Undo with ⌘Z")
+                            .accessibilityLabel("Delete \(shape.kind.label.lowercased())")
+                    }
                 }
                 ForEach(highlights) { mark in
                     row(symbol: mark.style == .underline ? "underline" : "highlighter", title: mark.quote.isEmpty ? "Selected region" : mark.quote,

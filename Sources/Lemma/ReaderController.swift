@@ -7,10 +7,25 @@ import LemmaCore
 final class ReaderController {
     weak var view: RegionPDFView?
     var regionMode = false { didSet { if regionMode { inkMode = false }; view?.cancelInkGesture() } }
-    var inkMode = false { didSet { if inkMode { regionMode = false }; view?.cancelInkGesture() } }
-    var inkEraser = false
+    var inkMode = false { didSet {
+        if inkMode { regionMode = false; showAnnotations = true } else { activeShapeID = nil }
+        view?.cancelInkGesture()
+    } }
+    var drawingTool: DrawingTool = .pen { didSet { view?.cancelInkGesture(); activeShapeID = nil } }
+    var inkEraser: Bool {
+        get { drawingTool == .eraser }
+        set { drawingTool = newValue ? .eraser : .pen }
+    }
     var inkColor: InkColor = .graphite
     var inkWidth: Double = 1.5
+    var shapeColorHex = "#2359B0"
+    var shapeFillOpacity: Double = 0
+    var shapeDashed = false
+    var activeShapeID: UUID?
+    var shapes: [PageShape] = []
+    var appliedShapes: [PageShape] = []
+    var shapeAnnotations: [UUID: PDFAnnotation] = [:]
+    weak var shapeDocument: PDFDocument?
     var onInk: ((InkStroke) -> Void)?
     var onEraseInk: ((UUID) -> Void)?
     var inkStrokes: [InkStroke] = []
@@ -94,7 +109,7 @@ final class ReaderController {
         view?.refreshCaptureOverlay()
         if showReferenceLinks { references?.prefetch(around: pageNumber - 1) }
     }
-    var showAnnotations = true
+    var showAnnotations = true { didSet { if !showAnnotations { activeShapeID = nil; view?.cancelShapeGesture() } } }
     var recallMask: SourceAnchor? { didSet { view?.updateOverlay() } }
     /// Cloze parts of the recall source; when empty the whole source region is hidden.
     var recallMaskRegions: [PageRegion] = [] { didSet { view?.updateOverlay() } }
@@ -582,8 +597,9 @@ final class RegionPDFView: PDFView {
     /// The capture rectangle being dragged in region mode, in this view's coordinates.
     private(set) var dragRectangle: CGRect?
     private var drawingStroke: InkStroke?
+    var shapeGesture: ShapeGesture?
     var highlightDrag: HighlightDrag?
-    private lazy var selectionOverlay = RegionSelectionOverlay(frame: bounds)
+    lazy var selectionOverlay = RegionSelectionOverlay(frame: bounds)
 
     /// A Shift-click with text selected extends the selection, as anywhere on the page, even over a reference.
     private func extendsSelection(_ modifiers: NSEvent.ModifierFlags) -> Bool {
@@ -606,6 +622,7 @@ final class RegionPDFView: PDFView {
         // AppKit hit-tests for every scroll-wheel event too; only a click needs the margin, the gutter and the references.
         if let event, ![.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) { return target }
         let local = convert(point, from: superview)
+        if let event, [.leftMouseDown, .rightMouseDown].contains(event.type), shapeHit(at: local) != nil { return self }
         if event?.type == .leftMouseDown { controller?.activeHighlightID = highlightHit(at: local)?.id }
         if let event, event.type == .rightMouseDown || (event.type == .leftMouseDown && event.modifierFlags.contains(.shift)),
            controller?.showAnnotations == true, highlightHit(at: local) != nil { return self }
@@ -753,6 +770,16 @@ final class RegionPDFView: PDFView {
 
     /// With the ruler on, ↓ ↑ (or J K) step through the lines, Return opens the line's first reference, Escape ends it.
     override func keyDown(with event: NSEvent) {
+        if let controller, controller.inkMode, event.modifierFlags.isDisjoint(with: [.command, .control, .option]) {
+            if event.keyCode == 53 {
+                if shapeGesture != nil { cancelShapeGesture() }
+                else { controller.inkMode = false }
+                return
+            }
+            if [51, 117].contains(event.keyCode), let id = controller.activeShapeID {
+                controller.owner?.removeShape(id: id); return
+            }
+        }
         guard let controller, controller.rulerMode, event.modifierFlags.isDisjoint(with: [.command, .control, .option]) else { super.keyDown(with: event); return }
         // While a proof is debugged: Return steps into the line's citation, Shift-Return steps out, Escape stops
         // (F11 is often taken by macOS, so the debugger also answers to the keys the ruler already uses).
@@ -838,6 +865,7 @@ final class RegionPDFView: PDFView {
     override func mouseDown(with event: NSEvent) {
         hoverPreview.dismiss()
         symbolHover.dismiss()
+        if handleShapeMouseDown(event) { return }
         controller?.activeHighlightID = highlightHit(at: convert(event.locationInWindow, from: nil))?.id
         if beginHighlightExtension(with: event) { return }
         if controller?.regionMode != true, controller?.inkMode != true,
@@ -905,6 +933,7 @@ final class RegionPDFView: PDFView {
         updateOverlay()
     }
     override func mouseDragged(with event: NSEvent) {
+        if shapeGesture != nil { updateShapeGesture(event); return }
         if highlightDrag != nil { updateHighlightExtension(with: event); return }
         if let pending = pendingReference {
             // Dragging from a reference selects text, as it would anywhere else on the page.
@@ -925,6 +954,7 @@ final class RegionPDFView: PDFView {
         updateOverlay()
     }
     override func mouseUp(with event: NSEvent) {
+        if shapeGesture != nil { finishShapeGesture(event); return }
         if highlightDrag != nil { finishHighlightExtension(with: event); return }
         // With the ruler on, a click on a line moves the ruler there.
         if let controller, controller.rulerMode, pendingReference == nil, !controller.regionMode, !controller.inkMode, event.clickCount == 1,
@@ -1009,6 +1039,7 @@ final class RegionPDFView: PDFView {
     /// Leaving ink or region mode drops the stroke in progress; the gutter and links come back (or go) with the mode.
     func cancelInkGesture() {
         drawingStroke = nil
+        cancelShapeGesture()
         selectionOverlay.updateStroke(nil, in: self)
         refreshCaptureOverlay()
     }
@@ -1265,6 +1296,7 @@ struct PDFReaderSurface: NSViewRepresentable {
     var notes: [StudyNote] = []
     var highlights: [StudyHighlight] = []
     var inkStrokes: [InkStroke] = []
+    var shapes: [PageShape] = []
     var selectedNoteID: UUID?
     var showAnnotations = true
     var recallMask: SourceAnchor?
@@ -1317,7 +1349,7 @@ struct PDFReaderSurface: NSViewRepresentable {
                 } else { view.go(to: page) }
                 controller.updatePage()
             }
-            controller.selection = nil; controller.hasSelection = false; controller.activeHighlightID = nil
+            controller.selection = nil; controller.hasSelection = false; controller.activeHighlightID = nil; controller.activeShapeID = nil
             controller.pageCount = document.pageCount
             controller.pageNumber = min(max(reading.pageIndex + 1, 1), document.pageCount)
         }
@@ -1333,6 +1365,7 @@ struct PDFReaderSurface: NSViewRepresentable {
         if controller.recallMask != recallMask { controller.recallMask = recallMask }
         controller.syncHighlights(highlights, in: document)
         controller.syncInk(inkStrokes, in: document)
+        controller.syncShapes(shapes, in: document)
         context.coordinator.observeScroll(in: view)
         view.scheduleOverlayRefresh()
         view.window?.invalidateCursorRects(for: view)

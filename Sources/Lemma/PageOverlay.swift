@@ -60,6 +60,7 @@ final class RegionSelectionOverlay: NSView {
     private let hoverFill = quiet(CAShapeLayer()), hoverLine = quiet(CAShapeLayer())
     private let flashLayer = quiet(CAShapeLayer())
     private let strokeLayer = quiet(CAShapeLayer())
+    private let shapePreview = quiet(CAShapeLayer()), shapeHandles = quiet(CAShapeLayer())
     private let selectedNote = quiet(CAShapeLayer())
     private let region = quiet(CAShapeLayer())
     private var recallViews: [RecallMaskView] = []
@@ -73,10 +74,12 @@ final class RegionSelectionOverlay: NSView {
         clipsToBounds = true
         shapes.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
         addSubview(shapes)
-        for sublayer in [dotsLayer, veil, band, bar, arrow, underlinesLayer, hoverFill, hoverLine, flashLayer, strokeLayer, selectedNote, region] {
+        for sublayer in [dotsLayer, veil, band, bar, arrow, underlinesLayer, hoverFill, hoverLine, flashLayer, strokeLayer, shapePreview, shapeHandles, selectedNote, region] {
             shapes.layer?.addSublayer(sublayer)
         }
         strokeLayer.fillColor = nil; strokeLayer.lineCap = .round; strokeLayer.lineJoin = .round
+        shapePreview.lineCap = .round; shapePreview.lineJoin = .round
+        shapeHandles.fillColor = NSColor.white.cgColor; shapeHandles.strokeColor = NSColor.systemBlue.cgColor; shapeHandles.lineWidth = 1.5
         hoverLine.fillColor = nil
         veil.fillRule = .evenOdd
         region.lineWidth = 2
@@ -190,7 +193,7 @@ final class RegionSelectionOverlay: NSView {
         for (_, entry) in noteViews { entry.view.removeFromSuperview() }
         noteViews = [:]; marginInputs = nil; visibleIndexes = []
         layout = Layout()
-        for layer in [hoverFill, hoverLine, flashLayer, strokeLayer, selectedNote, region, veil, band, bar] { layer.path = nil }
+        for layer in [hoverFill, hoverLine, flashLayer, strokeLayer, shapePreview, shapeHandles, selectedNote, region, veil, band, bar] { layer.path = nil }
         arrow.isHidden = true
         recallViews.forEach { $0.removeFromSuperview() }; recallViews = []; recallRectangles = []
         rectangle = nil; stroke = nil
@@ -567,6 +570,7 @@ final class RegionSelectionOverlay: NSView {
             selectedPath.addRect(note.anchor.region.rect.applying(transform(for: page, in: view)))
         }
         selectedNote.path = selectedPath.isEmpty ? nil : selectedPath
+        updateShapeHandles(in: view)
         updateRegion(in: view, controller: controller, document: document)
         updateRecallMasks(in: view, controller: controller, document: document)
     }
@@ -658,6 +662,33 @@ final class RegionSelectionOverlay: NSView {
     }
 
     // MARK: Ink
+
+    func updateShape(_ shape: PageShape?, in view: RegionPDFView) {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        guard let shape, let page = view.document?.page(at: shape.pageIndex) else { shapePreview.path = nil; updateShapeHandles(in: view); return }
+        _ = followScroll(in: view)
+        var toView = transform(for: page, in: view)
+        shapePreview.path = shape.path.copy(using: &toView)
+        shapePreview.strokeColor = shape.nativeColor.cgColor
+        shapePreview.fillColor = shape.kind.isClosed ? shape.nativeColor.withAlphaComponent(shape.fillOpacity).cgColor : nil
+        shapePreview.lineWidth = shape.width * view.scaleFactor
+        shapePreview.lineDashPattern = shape.dashed ? [6 * view.scaleFactor, 3 * view.scaleFactor].map { NSNumber(value: Double($0)) } : nil
+        updateShapeHandles(in: view)
+    }
+
+    private func updateShapeHandles(in view: RegionPDFView) {
+        guard let controller = view.controller, controller.showAnnotations,
+              let shape = view.shapeGesture?.preview ?? controller.activeShape, let page = view.document?.page(at: shape.pageIndex) else {
+            shapeHandles.path = nil; return
+        }
+        let toView = transform(for: page, in: view), path = CGMutablePath()
+        for point in [shape.start, shape.end] {
+            let center = CGPoint(x: point.x, y: point.y).applying(toView)
+            path.addRect(CGRect(x: center.x - 3.5, y: center.y - 3.5, width: 7, height: 7))
+        }
+        shapeHandles.path = path
+    }
 
     /// The stroke being drawn, extended point by point on a shape layer (the page is not redrawn for it).
     func updateStroke(_ stroke: InkStroke?, in view: RegionPDFView) {

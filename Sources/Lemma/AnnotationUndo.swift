@@ -110,4 +110,45 @@ extension StudyStore {
             }
         }
     }
+
+    func addShape(_ shape: PageShape, bookID requestedBookID: String? = nil, at index: Int? = nil, manager requestedManager: UndoManager? = nil) {
+        guard shape.isValid, let bookID = requestedBookID ?? workspace?.id,
+              let book = app.currentWorkspace(bookID) ?? (try? repository.load(id: bookID)),
+              shape.pageIndex < (book.pageCount ?? 0), !book.shapes.contains(where: { $0.id == shape.id }) else { return }
+        let manager = requestedManager ?? pdfUndoManager
+        guard editAnnotations(in: bookID, { $0.shapes.insert(shape, at: min(index ?? $0.shapes.count, $0.shapes.count)) }) else { return }
+        syncShapeReaders(bookID)
+        registerPDFUndo("Draw \(shape.kind.label)", manager: manager) { store in
+            store.removeShape(id: shape.id, bookID: bookID, manager: manager)
+        }
+    }
+
+    func replaceShape(_ shape: PageShape, bookID: String, manager requestedManager: UndoManager? = nil, actionName: String = "Change Shape") {
+        guard shape.isValid, let book = app.currentWorkspace(bookID) ?? (try? repository.load(id: bookID)),
+              let index = book.shapes.firstIndex(where: { $0.id == shape.id }), book.shapes[index] != shape else { return }
+        let previous = book.shapes[index], manager = requestedManager ?? pdfUndoManager
+        guard editAnnotations(in: bookID, { $0.shapes[index] = shape }) else { return }
+        syncShapeReaders(bookID)
+        registerPDFUndo(actionName, manager: manager) { store in
+            store.replaceShape(previous, bookID: bookID, manager: manager, actionName: actionName)
+        }
+    }
+
+    func removeShape(id: UUID, bookID requestedBookID: String? = nil, manager requestedManager: UndoManager? = nil) {
+        guard let bookID = requestedBookID ?? workspace?.id,
+              let book = app.currentWorkspace(bookID) ?? (try? repository.load(id: bookID)),
+              let index = book.shapes.firstIndex(where: { $0.id == id }) else { return }
+        let shape = book.shapes[index], manager = requestedManager ?? pdfUndoManager
+        guard editAnnotations(in: bookID, { $0.shapes.removeAll { $0.id == id } }) else { return }
+        syncShapeReaders(bookID)
+        registerPDFUndo("Delete \(shape.kind.label)", manager: manager) { store in
+            store.addShape(shape, bookID: bookID, at: index, manager: manager)
+        }
+    }
+
+    private func syncShapeReaders(_ bookID: String) {
+        for store in app.windows where store.workspace?.id == bookID {
+            if let document = store.document { store.reader.syncShapes(store.workspace?.shapes ?? [], in: document) }
+        }
+    }
 }

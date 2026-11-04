@@ -116,7 +116,7 @@ struct MarginNoteEditor: View {
     @Bindable var store: StudyStore
     let noteID: UUID
     let close: () -> Void
-    @State private var preview = false
+    @State private var preview = true
     @FocusState private var focused: Bool
 
     private var note: StudyNote? { store.workspace?.notes.first { $0.id == noteID } }
@@ -127,7 +127,7 @@ struct MarginNoteEditor: View {
                 Label("Margin note", systemImage: "note.text").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 if let note { Text(store.shortPageText(note.anchor.pageIndex)).font(.caption.monospacedDigit()).foregroundStyle(.tertiary) }
                 Spacer()
-                Button(preview ? "Edit" : "Preview") { preview.toggle() }.buttonStyle(.link).font(.caption)
+                Button(preview ? "Edit" : "Preview") { preview.toggle(); focused = !preview }.buttonStyle(.link).font(.caption)
                     .disabled(note?.body.isEmpty != false)
             }
             if preview, let note, !note.body.isEmpty {
@@ -151,7 +151,7 @@ struct MarginNoteEditor: View {
             }
         }
         .padding(12)
-        .onAppear { focused = true }
+        .onAppear { preview = note?.body.isEmpty == false; focused = !preview }
     }
 }
 

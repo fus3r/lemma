@@ -294,6 +294,7 @@ public struct StudyWorkspace: Codable, Identifiable, Equatable, Sendable {
     public var highlights: [StudyHighlight] = []
     public var noteLinks: [NoteLink] = []
     public var inkStrokes: [InkStroke] = []
+    public var shapes: [PageShape] = []
     /// Recorded when the PDF is opened, for reading progress in the library.
     public var pageCount: Int?
     /// The reader's progress on the book's exercises, by number.
@@ -313,7 +314,7 @@ public struct StudyWorkspace: Codable, Identifiable, Equatable, Sendable {
         self.sourceBookmark = sourceBookmark; self.fingerprint = fingerprint
     }
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, id, title, sourcePath, sourceBookmark, fingerprint, notes, pins, reading, lastOpenedAt, bookmarks, highlights, noteLinks, inkStrokes, pageCount, exercises, labs, readingLog, foldedProofs, understood, derivations
+        case schemaVersion, id, title, sourcePath, sourceBookmark, fingerprint, notes, pins, reading, lastOpenedAt, bookmarks, highlights, noteLinks, inkStrokes, shapes, pageCount, exercises, labs, readingLog, foldedProofs, understood, derivations
     }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -328,6 +329,7 @@ public struct StudyWorkspace: Codable, Identifiable, Equatable, Sendable {
         highlights = try c.decodeIfPresent([StudyHighlight].self, forKey: .highlights) ?? []
         noteLinks = try c.decodeIfPresent([NoteLink].self, forKey: .noteLinks) ?? []
         inkStrokes = try c.decodeIfPresent([InkStroke].self, forKey: .inkStrokes) ?? []
+        shapes = try c.decodeIfPresent([PageShape].self, forKey: .shapes) ?? []
         pageCount = try c.decodeIfPresent(Int.self, forKey: .pageCount)
         exercises = try c.decodeIfPresent([ExerciseRecord].self, forKey: .exercises) ?? []
         labs = try c.decodeIfPresent([LabNotebook].self, forKey: .labs) ?? []

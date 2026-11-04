@@ -77,6 +77,9 @@ extension StudyStore {
         for stroke in workspace.inkStrokes {
             if let page = pdf.page(at: stroke.pageIndex), let annotation = stroke.annotation() { page.addAnnotation(annotation) }
         }
+        for shape in workspace.shapes {
+            if let page = pdf.page(at: shape.pageIndex), let annotation = shape.annotation() { page.addAnnotation(annotation) }
+        }
         let renderer = ReaderController()
         renderer.syncHighlights(workspace.highlights, in: pdf)
         for note in workspace.notes {

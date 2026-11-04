@@ -55,7 +55,7 @@ struct ClassicShell: View {
     @ViewBuilder private var toolbarActions: some View {
         if store.document != nil && store.activeFileName == nil {
             Toggle(isOn: $store.reader.regionMode) { Label("Capture", systemImage: "viewfinder") }.toggleStyle(.button).help("Draw a source region · ⇧⌘S")
-            Toggle(isOn: $store.reader.inkMode) { Label("Draw", systemImage: "pencil.tip") }.toggleStyle(.button).help("Write on My edition · ⌥⇧⌘D")
+            Toggle(isOn: $store.reader.inkMode) { Label("Annotate", systemImage: "pencil.tip") }.toggleStyle(.button).help("PDF annotation toolbox: pen, boxes, ellipses, lines and arrows · ⌥⇧⌘D")
             Toggle(isOn: $store.reader.rulerMode) { Label("Ruler", systemImage: "text.line.first.and.arrowtriangle.forward") }.toggleStyle(.button)
                 .help("Reading ruler: one line at a time, ↓ ↑ or J K to step, Return to open its reference · ⌥⌘R")
             Menu {
@@ -99,7 +99,7 @@ struct ClassicShell: View {
                     ResizablePair(store: store, id: "editor.groups", axis: .vertical, minimumFirst: 260, minimumSecond: 300, showsSecond: !store.sideEditors.isEmpty) {
                         HStack(spacing: 0) {
                             PDFReaderSurface(document: document, reading: workspace.reading, controller: store.reader, regionMode: store.reader.regionMode,
-                                notes: workspace.notes, highlights: workspace.highlights, inkStrokes: workspace.inkStrokes, selectedNoteID: store.selectedNoteID,
+                                notes: workspace.notes, highlights: workspace.highlights, inkStrokes: workspace.inkStrokes, shapes: workspace.shapes, selectedNoteID: store.selectedNoteID,
                                 showAnnotations: store.reader.showAnnotations, recallMask: store.reader.recallMask,
                                 foldedProofs: Set(workspace.foldedProofs), understood: Set(workspace.understood))
                                 .tutorialAnchor(.page)
@@ -136,23 +136,11 @@ struct ClassicShell: View {
         .onChange(of: store.sideEditors.isEmpty) { _, _ in store.fitPageIfOverflowing() }
     }
 
-    private var selectionBar: some View {
+    @ViewBuilder private var selectionBar: some View {
+        if store.reader.inkMode {
+            AnnotationToolbox(store: store)
+        } else {
         HStack(spacing: 10) {
-            if store.reader.inkMode {
-                Picker("Drawing tool", selection: $store.reader.inkEraser) {
-                    Label("Pen", systemImage: "pencil.tip").tag(false); Label("Eraser", systemImage: "eraser").tag(true)
-                }.pickerStyle(.segmented).frame(width: 150).labelsHidden()
-                if !store.reader.inkEraser {
-                    Picker("Ink color", selection: $store.reader.inkColor) {
-                        ForEach(InkColor.allCases, id: \.self) { color in Text(color.label).tag(color) }
-                    }.labelsHidden().fixedSize()
-                    Picker("Pen width", selection: $store.reader.inkWidth) {
-                        Text("Fine").tag(1.5); Text("Medium").tag(3.0); Text("Broad").tag(5.0)
-                    }.labelsHidden().fixedSize()
-                }
-                Spacer(minLength: 0)
-                Button { store.reader.inkMode = false } label: { Image(systemName: "xmark") }.help("Finish drawing")
-            } else {
                 Image(systemName: store.reader.regionMode ? "viewfinder" : "selection.pin.in.out").foregroundStyle(Color.lemmaOlive)
                 Text(store.reader.hasSelection ? (store.reader.regionMode ? "Region selected" : "Text selected") : (store.reader.regionMode ? "Drag around an equation or passage" : "Select text to highlight or annotate")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     .layoutPriority(-1)
@@ -163,10 +151,10 @@ struct ClassicShell: View {
                     selectionActions(labels: false)
                 }
                 if store.reader.regionMode { Button { store.reader.regionMode = false } label: { Image(systemName: "xmark") }.help("Return to text selection") }
-            }
         }
         .font(.system(size: 12))
         .buttonStyle(.borderless).padding(.horizontal, 12).frame(height: 30).background(Color.lemmaOlive.opacity(0.07))
+        }
     }
 
     private func selectionActions(labels: Bool) -> some View {

@@ -196,7 +196,14 @@ struct EditorActions: View {
                     VSIconButton(icon: "debug-alt", help: "Debug the Statement in View: step through its proof (F5)", tint: theme[.debugIconStartForeground]) { store.startDebugging() }
                 }
                 VSIconButton(icon: "inspect", help: "Capture a Region (⇧⌘S)", toggled: store.reader.regionMode) { store.reader.regionMode.toggle() }
-                VSIconButton(icon: "edit", help: "Draw on My Edition (⌥⇧⌘D)", toggled: store.reader.inkMode) { store.reader.inkMode.toggle() }
+                VSMenu(items: {
+                    [.action("PDF Annotation Toolbox", checked: store.reader.inkMode, shortcut: "⌥⇧⌘D") { store.reader.inkMode.toggle() }, .separator]
+                    + PageShapeKind.allCases.map { kind in
+                        .action("Draw \(kind.label)") { store.reader.inkMode = true; store.reader.drawingTool = DrawingTool(rawValue: kind.rawValue) ?? .rectangle }
+                    }
+                }) {
+                    HStack(spacing: 4) { Codicon("edit", size: 16); Text("Annotate").font(.ui(12)) }.padding(.horizontal, 6).frame(height: 24)
+                }.accessibilityElement(children: .combine).help("PDF annotation toolbox: pen, boxes, ellipses, lines and arrows (⌥⇧⌘D)").accessibilityLabel("Annotate PDF")
                 VSIconButton(icon: "symbol-ruler", help: "Reading Ruler: one line at a time (⌥⌘R)", toggled: store.reader.rulerMode) { store.reader.rulerMode.toggle() }
                 VSIconButton(icon: "split-horizontal", help: "Split Editor: another page beside this one (⌘\\)") { store.toggleSplit() }
                 moreMenu
