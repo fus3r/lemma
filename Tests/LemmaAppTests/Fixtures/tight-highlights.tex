@@ -1,0 +1,42 @@
+% tectonic tight-highlights.tex
+% Embedded math-font metrics inflate PDFKit's second line into the third.
+\documentclass[a4paper,11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage[margin=2.1cm]{geometry}
+\setlength{\parindent}{0pt}
+\pagestyle{empty}
+\begin{document}
+Three comparisons are useful. First, the distance must be sufficiently large.\\
+We retain $R\geq\lambda$ as a useful reference for sizing the experiment.\\
+This neighbouring line must remain completely free of yellow highlighting.
+
+\vspace{6mm}
+Consecutive math line with $R\geq\lambda$ and ordinary prose.\\
+Another selected line with $R\geq 2D^2/\lambda$ and a raised exponent.\\
+An unselected line beneath the two formulas.
+
+\vspace{1cm}
+\begin{minipage}[t]{0.44\textwidth}
+Left column with ordinary text and accents: caf\'e, na\"ive.\\
+An inline formula $x_i^2\geq y_j$ sits in this selected line.\\
+The next line in the left column is not selected.
+\end{minipage}\hfill
+\begin{minipage}[t]{0.44\textwidth}
+\large Right column with a larger font size.\\
+A second line in the right column.\\
+A third line in the right column.
+\end{minipage}
+
+\vspace{1cm}
+\small Small text above a larger line.\\
+{\Large Larger selected text with ascenders and descenders.}\\[2pt]
+\small Small text below a larger line.
+
+\vspace{1cm}
+A displayed formula keeps its fraction and limits:
+\[
+\sum_{i=1}^{n}\frac{x_i^2}{1+\lambda_i}=\int_0^1 f(t)\,dt.
+\]
+\end{document}

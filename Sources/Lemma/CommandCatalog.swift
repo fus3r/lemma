@@ -15,6 +15,7 @@ extension StudyStore {
         add("File: New Window", "macwindow", "⇧⌘N") { [self] in app.newWindow() }
         add("File: Add New File…", "doc.badge.plus", "⌃⌥⌘N") { [self] in beginNewFile() }
         add("File: Save File", "square.and.arrow.down", "⌘S", when: activeFile != nil) { [self] in saveActiveFile() }
+        add("File: Find in File…", "magnifyingglass", "⌘F", when: activeFile != nil) { [self] in findInWorkspaceFile() }
         add("File: Show Workspace Files in Finder", "folder") { [self] in revealWorkspaceFiles() }
         add("File: Open PDF…", "folder", "⌘O") { [self] in choosePDF() }
         add("Library: Manage Watched Sources…", "folder.badge.gearshape") { [self] in showLibrarySources = true }
@@ -135,6 +136,12 @@ extension StudyStore {
         add("Study: Pin Selection", "pin", "⌥⌘P", when: selected) { [self] in pinSelection() }
         add("Study: Highlight Selection", "highlighter", "⇧⌘H", when: selected) { [self] in highlightSelection() }
         add("Study: Underline Selection", "underline", "⇧⌘U", when: selected) { [self] in highlightSelection(style: .underline) }
+        for swatch in app.highlightPalette.settings.colors {
+            add("Study: Highlight with \(swatch.name)", "highlighter", swatch.shortcut?.label, when: canApplyHighlightColor) { [self] in
+                applyHighlightSwatch(swatch, style: .highlight)
+            }
+        }
+        add("Preferences: Highlight Colors & Shortcuts…", "highlighter") { [self] in editHighlightColors() }
         add("Study: Look Up Definition…", "character.book.closed", "⇧⌘L", when: book) { [self] in lookupSelection() }
         add(reader.regionMode ? "Study: Stop Capturing" : "Study: Capture a Region", "viewfinder", "⇧⌘S", when: book) { [self] in reader.regionMode.toggle() }
         add(reader.inkMode ? "Study: Stop Drawing" : "Study: Draw on My Edition", "pencil.tip", "⌥⇧⌘D", when: book) { [self] in reader.inkMode.toggle() }

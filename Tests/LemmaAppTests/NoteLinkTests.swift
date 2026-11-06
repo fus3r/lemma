@@ -75,6 +75,45 @@ final class NoteLinkTests: XCTestCase {
     }
 
     @MainActor
+    func testDeletedLinkUndoTargetsItsBookAcrossWindowsAndClosedTabs() throws {
+        let workbench = try WorkbenchFixture()
+        let first = workbench.store
+        defer { first.app.prepareForTermination(); workbench.close() }
+        first.open(workbench.book)
+        let bookID = try XCTUnwrap(first.workspace?.id)
+        first.workspace?.notes = fixture().notes
+        let notes = try XCTUnwrap(first.workspace?.notes)
+        let deleted = try XCTUnwrap(first.addNoteLink(from: notes[0].id, to: notes[1].id, kind: .definition, usage: "Keep this relationship."))
+        let undo = first.pdfUndoManager
+        undo.removeAllActions(); undo.groupsByEvent = false
+        undo.beginUndoGrouping()
+        first.removeNoteLink(id: deleted.id, undoManager: undo)
+        undo.endUndoGrouping()
+        first.open(workbench.paper)
+
+        let second = first.app.newWindow()
+        second.open(workbench.book)
+        let other = try XCTUnwrap(second.addNoteLink(from: notes[1].id, to: notes[2].id, kind: .related))
+        undo.undo()
+        XCTAssertEqual(second.workspace?.noteLinks, [deleted, other], "Undo restores the original book without losing another window's links.")
+        XCTAssertTrue(first.workspace?.noteLinks.isEmpty == true, "The selected PDF is untouched.")
+        XCTAssertTrue(undo.canRedo)
+        guard undo.canRedo else { return }
+        undo.redo()
+        XCTAssertEqual(second.workspace?.noteLinks, [other])
+
+        second.closeBook()
+        undo.undo()
+        XCTAssertEqual(try first.repository.load(id: bookID)?.noteLinks, [deleted, other], "Undo also restores a closed book durably.")
+        XCTAssertTrue(undo.canRedo)
+        guard undo.canRedo else { return }
+        undo.redo()
+        XCTAssertEqual(try first.repository.load(id: bookID)?.noteLinks, [other])
+        XCTAssertTrue(first.workspace?.noteLinks.isEmpty == true)
+        XCTAssertNil(first.error)
+    }
+
+    @MainActor
     func testDeletingLinksAndNotesRestoresRelationshipsWithUndo() throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -66,7 +66,7 @@ final class QuestionRuntime {
     /// The login shell's PATH; tests replace it so they never run the reader's shell start-up files.
     @ObservationIgnored var loginShellPath: @Sendable () async -> [String] = { await CLIEnvironment.loginShellPath() }
     @ObservationIgnored private var statusCheckedAt: [QuestionProvider: Date] = [:]
-    @ObservationIgnored private weak var store: StudyStore?
+    @ObservationIgnored private weak var app: AppModel?
     @ObservationIgnored private var webSession: ChatGPTSession?
     @ObservationIgnored private var webViewers = 0
     @ObservationIgnored private var webRelease: Task<Void, Never>?
@@ -117,7 +117,7 @@ final class QuestionRuntime {
     // MARK: Questions
 
     func start(_ packet: BrowserPacket, store: StudyStore, replacingDraft: Bool = false) {
-        self.store = store
+        self.app = store.app
         // The open book is current; the library's copy of it may not have the note yet.
         let question = store.workspace?.notes.first { $0.id == packet.noteID }?.question
             ?? store.library.first { $0.id == packet.workspaceID }?.notes.first { $0.id == packet.noteID }?.question ?? ""
@@ -263,8 +263,11 @@ final class QuestionRuntime {
         guard !job.finished else { return }
         var result = result
         result.message = result.message.map { APIKeyFormat.redacted($0) }
+        // Questions belong to the shared app, not the last window that asked one. That window may have closed
+        // while another window's answer was still streaming.
+        let store = job.packet.workspaceID.flatMap { app?.owner(of: $0) } ?? app?.front
         do {
-            try store?.mailbox.saveResult(result)
+            try app?.mailbox.saveResult(result)
             job.answer = result.answer ?? job.answer; job.model = result.model ?? job.model
             job.message = result.message ?? result.status; job.failed = result.status == "error"; job.finished = true
             job.process = nil
@@ -275,7 +278,8 @@ final class QuestionRuntime {
 
     /// Asks a finished question again, as a new request with the same draft and images, to the same note.
     func retry(_ job: QuestionJob, replacingDraft: Bool = false) {
-        guard job.finished, let store else { return }
+        guard job.finished, let app else { return }
+        let store = job.packet.workspaceID.flatMap { app.owner(of: $0) } ?? app.front
         store.askAgain(job.packet, replacingDraft: replacingDraft)
     }
 

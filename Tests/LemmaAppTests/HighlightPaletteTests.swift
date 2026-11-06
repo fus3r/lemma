@@ -33,7 +33,7 @@ final class HighlightPaletteTests: XCTestCase {
         func wells() -> [NSColorWell] { descendants(NSColorWell.self, in: host).sorted { center($0).y < center($1).y } }
         func trash(at index: Int) throws -> NSButton {
             let well = wells()[index]
-            return try XCTUnwrap(descendants(NSButton.self, in: host).first { abs(center($0).y - center(well).y) < 2 })
+            return try XCTUnwrap(descendants(NSButton.self, in: host).filter { abs(center($0).y - center(well).y) < 2 }.max { center($0).x < center($1).x })
         }
         var names = ["Yellow", "Green", "Blue", "Rose", "Violet"]
         // Click the actual native trash buttons: the last row reproduces the crash, and the first shifts later rows.
@@ -56,6 +56,69 @@ final class HighlightPaletteTests: XCTestCase {
         XCTAssertEqual(restored.settings.colors.first?.name, "Green")
         XCTAssertEqual(restored.settings.highlightID, "green")
         XCTAssertEqual(restored.settings.underlineID, "green")
+    }
+
+    @MainActor
+    func testRecorderReceivesCommandKeysBeforeMenusAndCanClearOrCancel() throws {
+        let fixture = try WorkbenchFixture()
+        defer { fixture.store.app.prepareForTermination(); fixture.close() }
+        let control = HighlightShortcutControl(frame: CGRect(x: 20, y: 20, width: 142, height: 28))
+        XCTAssertTrue(control.isAccessibilityElement())
+        XCTAssertEqual(control.accessibilityRole(), .button)
+        fixture.window.contentView?.addSubview(control)
+        fixture.window.makeKeyAndOrderFront(nil)
+        var recorded: HighlightShortcut?
+        control.record = { recorded = $0; return nil }
+        func event(_ key: String, code: UInt16, flags: NSEvent.ModifierFlags) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                          windowNumber: fixture.window.windowNumber, context: nil, characters: key,
+                                          charactersIgnoringModifiers: key, isARepeat: false, keyCode: code))
+        }
+        XCTAssertTrue(control.accessibilityPerformPress())
+        XCTAssertTrue(fixture.window.firstResponder === control)
+        XCTAssertTrue(fixture.window.performKeyEquivalent(with: try event("b", code: 11, flags: [.command, .control])))
+        XCTAssertEqual(recorded, HighlightShortcut(key: "b", modifiers: [.command, .control]))
+        XCTAssertFalse(control.recording)
+        control.accessibilityPerformPress()
+        control.keyDown(with: try event("\u{1b}", code: 53, flags: []))
+        XCTAssertEqual(recorded?.key, "b")
+        control.accessibilityPerformPress()
+        control.keyDown(with: try event("\u{7f}", code: 51, flags: []))
+        XCTAssertNil(recorded)
+    }
+
+    @MainActor
+    func testShortcutsPersistOnLegacyPalettesRejectDuplicatesAndApplyOnlyInTheReader() throws {
+        let fixture = try WorkbenchFixture()
+        let store = fixture.store, palette = fixture.store.app.highlightPalette
+        defer { store.app.prepareForTermination(); fixture.close() }
+        // The optional field must read palettes written before shortcuts existed.
+        let old = Data(#"{"colors":[{"id":"yellow","name":"Yellow","color":"yellow"}],"highlightID":"yellow","underlineID":"yellow"}"#.utf8)
+        let legacy = try JSONDecoder().decode(HighlightPalette.Settings.self, from: old)
+        XCTAssertNil(legacy.colors.first?.shortcut)
+        let shortcut = HighlightShortcut(key: "b", modifiers: [.command, .control])
+        XCTAssertEqual(shortcut.label, "⌃⌘B")
+        var draft = palette.settings
+        draft.colors[2].shortcut = shortcut
+        try palette.save(draft)
+        XCTAssertEqual(HighlightPalette(url: store.repository.root.appendingPathComponent("HighlightColors.json")).settings, draft)
+        draft.colors[0].shortcut = shortcut
+        XCTAssertThrowsError(try palette.save(draft))
+        XCTAssertNil(palette.settings.colors[0].shortcut, "A rejected draft leaves the saved palette intact")
+        let menu = NSMenu(); let item = NSMenuItem(title: "Existing command", action: nil, keyEquivalent: "b")
+        item.keyEquivalentModifierMask = [.command, .control]; menu.addItem(item)
+        XCTAssertEqual(shortcut.conflict(in: menu), "Existing command")
+        store.open(fixture.book)
+        store.reader.selection = (0, CGRect(x: 40, y: 600, width: 220, height: 40), "A passage")
+        store.reader.hasSelection = true
+        let blue = palette.settings.colors[2]
+        store.applyHighlightSwatch(blue, style: .highlight)
+        XCTAssertEqual(store.workspace?.highlights.last?.color, .blue)
+        let count = store.workspace?.highlights.count
+        _ = try store.createWorkspaceFile(name: "Notes", kind: .text)
+        store.applyHighlightSwatch(palette.settings.colors[0], style: .highlight)
+        XCTAssertEqual(store.workspace?.highlights.count, count)
+        XCTAssertEqual(store.workspace?.highlights.last?.color, .blue, "A file tab must not recolor a selection retained in the PDF")
     }
 
     @MainActor

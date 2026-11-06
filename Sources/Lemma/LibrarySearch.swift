@@ -134,7 +134,6 @@ extension StudyStore {
     }
 
     func openPageResult(_ result: PassageSearchResult) {
-        if workspace?.id == result.workspaceID { reader.goToPage(result.pageIndex + 1); return }
         openBook(result.workspaceID, atPage: result.pageIndex)
     }
 

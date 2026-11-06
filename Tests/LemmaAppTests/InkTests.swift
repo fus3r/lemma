@@ -7,6 +7,74 @@ import LemmaCore
 
 final class InkTests: XCTestCase {
     @MainActor
+    func testOriginalEditionLeavesDrawingModeAndCannotEraseHiddenInk() throws {
+        let fixture = try WorkbenchFixture()
+        let store = fixture.store
+        defer { store.app.prepareForTermination(); fixture.close() }
+        store.open(fixture.book)
+        let document = try XCTUnwrap(store.document), page = try XCTUnwrap(document.page(at: 0))
+        let view = RegionPDFView(frame: CGRect(x: 0, y: 0, width: 900, height: 800))
+        view.controller = store.reader; store.reader.view = view; view.document = document
+        view.displayMode = .singlePage; view.autoScales = true
+        fixture.window.contentView = view; view.layoutDocumentView(); view.layoutSubtreeIfNeeded()
+        let stroke = InkStroke(pageIndex: 0, points: [.init(x: 80, y: 80), .init(x: 160, y: 140)])
+        store.addInk(stroke, undoManager: nil)
+        store.reader.onEraseInk = { store.removeInk(id: $0, undoManager: nil) }
+        store.reader.inkMode = true; store.reader.drawingTool = .eraser
+        store.reader.showAnnotations = false
+        store.reader.syncInk([stroke], in: document)
+        XCTAssertTrue(page.annotations.isEmpty)
+        XCTAssertFalse(store.reader.inkMode, "Original is a read-only view of the source, so drawing must end")
+        let point = view.convert(view.convert(CGPoint(x: 120, y: 110), from: page), to: nil)
+        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
+            timestamp: 0, windowNumber: fixture.window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        // In reading mode PDFKit tracks a normal selection until mouse-up.
+        let release = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: point, modifierFlags: [],
+            timestamp: 0.1, windowNumber: fixture.window.windowNumber, context: nil, eventNumber: 2, clickCount: 1, pressure: 0))
+        NSApp.postEvent(release, atStart: true)
+        view.mouseDown(with: event)
+        XCTAssertEqual(store.workspace?.inkStrokes, [stroke], "Clicking the original page must not erase an invisible annotation")
+    }
+
+    @MainActor
+    func testInkUndoTargetsItsBookAcrossWindowsAndClosedTabs() throws {
+        let fixture = try WorkbenchFixture()
+        let first = fixture.store
+        defer { first.app.prepareForTermination(); fixture.close() }
+        first.open(fixture.book)
+        let bookID = try XCTUnwrap(first.workspace?.id)
+        let undo = first.pdfUndoManager
+        let stroke = InkStroke(pageIndex: 0, points: [.init(x: 80, y: 80), .init(x: 160, y: 140)])
+        undo.beginUndoGrouping()
+        first.addInk(stroke, undoManager: undo)
+        undo.endUndoGrouping()
+
+        let second = first.app.newWindow()
+        second.open(fixture.book)
+        let other = InkStroke(pageIndex: 0, points: [.init(x: 220, y: 80), .init(x: 260, y: 140)])
+        second.addInk(other, undoManager: nil)
+        first.open(fixture.paper)
+        undo.undo()
+        XCTAssertTrue(first.workspace?.inkStrokes.isEmpty == true, "Undo must leave the selected PDF untouched")
+        XCTAssertEqual(second.workspace?.inkStrokes, [other], "Undo removes the original stroke and retains another window's work")
+        XCTAssertEqual(second.reader.inkStrokes, [other])
+
+        second.closeBook()
+        undo.redo()
+        XCTAssertEqual(try first.repository.load(id: bookID)?.inkStrokes, [stroke, other], "Redo also works when the original book is closed")
+
+        first.activateTab(bookID)
+        undo.removeAllActions()
+        undo.beginUndoGrouping()
+        first.removeInk(id: stroke.id, undoManager: undo)
+        undo.endUndoGrouping()
+        first.open(fixture.paper)
+        undo.undo()
+        XCTAssertEqual(try first.repository.load(id: bookID)?.inkStrokes, [stroke, other], "Undoing the eraser restores the original book")
+        XCTAssertTrue(first.workspace?.inkStrokes.isEmpty == true)
+    }
+
+    @MainActor
     func testEditionSelectionSurvivesHostedPDFUpdates() async throws {
         _ = NSApplication.shared
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -90,7 +158,7 @@ final class InkTests: XCTestCase {
         XCTAssertEqual(PDFDocument(url: root.appendingPathComponent("edition.pdf"))?.page(at: 0)?.annotations.filter { $0.type == "Ink" }.count, 1)
         XCTAssertEqual(try Data(contentsOf: source), original)
         XCTAssertThrowsError(try reopened.exportPersonalPDF(to: source))
-        store.reader.inkEraser = true
+        store.reader.inkMode = true; store.reader.inkEraser = true
         store.reader.onEraseInk = { store.removeInk(id: $0, undoManager: undo) }
         undo.beginUndoGrouping(); view.mouseDown(with: try event(.leftMouseDown, view.convert(CGPoint(x: 100, y: 95), from: page))); undo.endUndoGrouping()
         XCTAssertTrue(store.workspace?.inkStrokes.isEmpty == true); undo.undo(); XCTAssertEqual(store.workspace?.inkStrokes, [stroke])

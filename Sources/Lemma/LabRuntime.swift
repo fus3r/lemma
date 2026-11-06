@@ -38,8 +38,9 @@ final class LabSession {
     @ObservationIgnored var requests: [UUID: UUID] = [:]
     @ObservationIgnored var interruptedAt: Date?
     @ObservationIgnored var completionWaiters: [UUID: CheckedContinuation<[String], Never>] = [:]
-    /// Console inputs waiting or running in this session, among the queued ids.
-    @ObservationIgnored var consoleIDs: Set<UUID> = []
+    /// Console inputs waiting or running in this session. Keep their code independently of the visible history,
+    /// so Clear Console can erase the display without cancelling commands that are already queued.
+    @ObservationIgnored var consoleInputs: [UUID: String] = [:]
     /// The running cell's outputs, gathered here and shown once per batch of kernel events (at most ten times a second)
     /// in the open book; a notebook of a book in another tab gets them, saved once, when the cell ends.
     @ObservationIgnored var live: LiveOutput?
@@ -366,6 +367,7 @@ extension StudyStore {
             let code = LabCell(kind: .code, source: "# \(source.label), \(shortPageText(source.pageIndex))\n")
             let cells = Array(added.filter { $0.kind == .text }) + [code]
             updateLab(id) { $0.cells += cells }
+            openLabNotebook(id)
             lab.requestFocus(code.id)
             status = "\(source.label) added to the open notebook."
         } else {
@@ -391,6 +393,7 @@ extension StudyStore {
         let code = blocks.map { LabCell(kind: .code, source: $0) }
         if let id = openLabID, lab(id) != nil {
             updateLab(id) { $0.cells += [header] + code }
+            openLabNotebook(id)
             if let first = code.first { lab.requestFocus(first.id) }
             status = "The answer's code was added to the open notebook. Nothing runs until you run a cell."
             return
@@ -571,6 +574,7 @@ extension StudyStore {
 
     func interruptLab(_ notebookID: UUID) {
         guard let session = lab.sessions[notebookID] else { return }
+        for id in session.queued { session.consoleInputs[id] = nil }
         session.queued.removeAll()
         guard session.state == .busy, let kernel = session.kernel else { return }
         session.interruptedAt = .now
@@ -599,7 +603,7 @@ extension StudyStore {
         session.kernel?.shutdown()
         session.kernel = nil
         session.cancelWaiters()
-        if let running = session.runningCellID, !session.consoleIDs.contains(running) {
+        if let running = session.runningCellID, session.consoleInputs[running] == nil {
             let note = LabOutput(kind: .error, text: "Stopped: Python was restarted")
             if session.live?.cellID == running {
                 session.live?.outputs.append(note)
@@ -637,11 +641,12 @@ extension StudyStore {
     private func startLabKernelIfNeeded(_ session: LabSession) {
         guard session.kernel == nil, session.state == .stopped else { return }
         session.state = .starting
-        lab.saveStoppedOutput = { [weak self] session, note in
-            guard let self, let live = session.live else { return }
+        let app = self.app
+        lab.saveStoppedOutput = { [weak app] session, note in
+            guard let store = app?.owner(of: session.workspaceID) ?? app?.windows.first, let live = session.live else { return }
             session.live?.outputs.append(LabOutput(kind: .error, text: note))
-            self.finishLiveOutput(session, cellID: live.cellID)
-            if session.workspaceID == self.workspace?.id { self.flush() }
+            store.finishLiveOutput(session, cellID: live.cellID)
+            if session.workspaceID == store.workspace?.id { store.flush() }
         }
         let notebookID = session.notebookID
         Task { @MainActor [weak self, weak session] in
@@ -673,14 +678,15 @@ extension StudyStore {
                 let repository = self.repository, workspaceID = session.workspaceID
                 // Output comes in batches, at most ten a second; the kernel is held weakly, so one that loses its
                 // session is released (and stopped) rather than kept alive by its own events.
-                try kernel.start(every: 0.1) { [weak self, weak kernel] events in
+                try kernel.start(every: 0.1) { [weak app, weak kernel] events in
                     let deliveries = LabDelivery.prepare(events, repository: repository, workspaceID: workspaceID)
                     Task { @MainActor in
-                        guard let self, let kernel else {
+                        // Python belongs to the book shared by windows, not the workbench that started it.
+                        guard let store = app?.owner(of: workspaceID) ?? app?.windows.first, let kernel else {
                             LabDelivery.discard(deliveries, repository: repository, workspaceID: workspaceID)
                             return
                         }
-                        self.handleLab(deliveries, notebookID: notebookID, workspaceID: workspaceID, kernel: kernel)
+                        store.handleLab(deliveries, notebookID: notebookID, workspaceID: workspaceID, kernel: kernel)
                     }
                 }
             } catch {
@@ -696,7 +702,7 @@ extension StudyStore {
         let cells = session.queued
         session.queued.removeAll()
         for cellID in cells {
-            if session.consoleIDs.contains(cellID) {
+            if session.consoleInputs.removeValue(forKey: cellID) != nil {
                 editConsole(session.notebookID, entry: cellID) { $0.outputs = [LabOutput(kind: .error, text: message)] }
                 continue
             }
@@ -710,12 +716,12 @@ extension StudyStore {
         guard session.state == .idle, session.runningCellID == nil, let kernel = session.kernel else { return }
         while let cellID = session.queued.first {
             session.queued.removeFirst()
-            if session.consoleIDs.contains(cellID), let entry = lab.consoles[session.notebookID]?.first(where: { $0.id == cellID }) {
+            if let code = session.consoleInputs[cellID] {
                 let request = UUID()
                 session.requests[request] = cellID
                 session.runningCellID = cellID
                 session.state = .busy
-                kernel.execute(id: request, code: entry.code)
+                kernel.execute(id: request, code: code)
                 return
             }
             let open = session.workspaceID == workspace?.id
@@ -768,7 +774,7 @@ extension StudyStore {
     /// a console entry, or (for a cell that is not the one running, which should not happen) the notebook itself.
     private func output(_ session: LabSession, _ request: UUID?, _ change: (inout [LabOutput]) -> Void) {
         guard let id = cellID(request, in: session) else { return }
-        if session.consoleIDs.contains(id) { editConsole(session.notebookID, entry: id) { change(&$0.outputs) }; return }
+        if session.consoleInputs[id] != nil { editConsole(session.notebookID, entry: id) { change(&$0.outputs) }; return }
         if session.live?.cellID == id {
             change(&session.live!.outputs)
             session.live!.changed = true
@@ -830,9 +836,9 @@ extension StudyStore {
         case let .error(request, name, value, traceback):
             output(session, request) { $0.append(LabOutput(kind: .error, text: value.isEmpty ? name : "\(name): \(value)", detail: traceback.isEmpty ? nil : traceback)) }
         case let .done(request, status, count, duration):
-            if let id = cellID(request, in: session), session.consoleIDs.contains(id) {
+            if let id = cellID(request, in: session), session.consoleInputs[id] != nil {
                 editConsole(notebookID, entry: id) { $0.count = count }
-                session.consoleIDs.remove(id)
+                session.consoleInputs[id] = nil
             } else if let id = cellID(request, in: session) {
                 finishLiveOutput(session, cellID: id) { cell in cell.executionCount = count; cell.lastRunAt = .now; cell.duration = duration }
             }
@@ -840,7 +846,10 @@ extension StudyStore {
             session.runningCellID = nil
             session.state = .idle
             session.interruptedAt = nil
-            if status != "ok" { session.queued.removeAll() }
+            if status != "ok" {
+                for id in session.queued { session.consoleInputs[id] = nil }
+                session.queued.removeAll()
+            }
             if status == "interrupted" { session.show("Interrupted.", transient: true) } else if session.messageIsTransient { session.show(nil) }
             dispatchLab(session)
             if session.workspaceID == workspace?.id { scheduleSave() }
@@ -850,7 +859,7 @@ extension StudyStore {
             session.cancelWaiters()
             if let running = session.runningCellID {
                 let note = LabOutput(kind: .error, text: "Python stopped (exit status \(code))")
-                if session.consoleIDs.contains(running) {
+                if session.consoleInputs[running] != nil {
                     editConsole(notebookID, entry: running) { $0.outputs.append(note) }
                 } else if session.live?.cellID == running {
                     session.live?.outputs.append(note)
@@ -865,7 +874,7 @@ extension StudyStore {
             session.live = nil
             session.runningCellID = nil
             session.queued.removeAll()
-            session.consoleIDs.removeAll()
+            session.consoleInputs.removeAll()
             session.state = .stopped
             if code != 0 && code != 15 && code != 2 { session.show("Python stopped unexpectedly (exit status \(code)). Run a cell to start it again.") }
         }
@@ -896,7 +905,7 @@ extension StudyStore {
         let entry = ConsoleEntry(id: UUID(), code: code.trimmingCharacters(in: .newlines))
         lab.consoles[sessionID, default: []].append(entry)
         if lab.history.last != entry.code { lab.history.append(entry.code) }
-        session.consoleIDs.insert(entry.id)
+        session.consoleInputs[entry.id] = entry.code
         session.queued.append(entry.id)
         startLabKernelIfNeeded(session)
         dispatchLab(session)

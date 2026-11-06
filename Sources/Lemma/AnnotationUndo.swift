@@ -6,7 +6,7 @@ extension StudyStore {
     /// Use the native window's stack so Edit > Undo/Redo and their standard shortcuts work from the reader.
     var pdfUndoManager: UndoManager { mainWindow?.undoManager ?? reader.view?.undoManager ?? fallbackUndoManager }
 
-    private func registerPDFUndo(_ name: String, manager: UndoManager, _ inverse: @escaping @MainActor (StudyStore) -> Void) {
+    func registerPDFUndo(_ name: String, manager: UndoManager, _ inverse: @escaping @MainActor (StudyStore) -> Void) {
         let group = !manager.groupsByEvent && manager.groupingLevel == 0 && !manager.isUndoing && !manager.isRedoing
         if group { manager.beginUndoGrouping() }
         manager.registerUndo(withTarget: self) { store in MainActor.assumeIsolated { inverse(store) } }
@@ -16,7 +16,7 @@ extension StudyStore {
 
     /// Undo retains the original book's identity. Switching tabs cannot apply a note or highlight to another PDF.
     @discardableResult
-    private func editAnnotations(in bookID: String, _ edit: (inout StudyWorkspace) -> Void) -> Bool {
+    func editAnnotations(in bookID: String, _ edit: (inout StudyWorkspace) -> Void) -> Bool {
         if let showing = app.windows.first(where: { $0.workspace?.id == bookID }) {
             guard var book = showing.workspace else { return false }
             edit(&book)

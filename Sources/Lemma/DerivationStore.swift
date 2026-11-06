@@ -35,7 +35,10 @@ extension StudyStore {
         edit(&workspace!.derivations[index])
         workspace!.derivations[index].updatedAt = .now
         scheduleSave()
-        if workspace!.derivations[index].source != before { checkDerivation(id) }
+        if workspace!.derivations[index].source != before {
+            // The source is shared; a successful verdict in another window must not survive a changed equation.
+            for window in app.windows { window.checkDerivation(id) }
+        }
     }
 
     func deleteDerivation(_ id: UUID) {
@@ -49,6 +52,8 @@ extension StudyStore {
     /// Checks a derivation off the main thread; a newer edit cancels an older check.
     func checkDerivation(_ id: UUID, delay: Int = 180) {
         derivationChecks[id]?.cancel()
+        derivationChecks[id] = nil
+        derivationReports[id] = nil
         guard let source = derivation(id)?.source else { return }
         derivationChecks[id] = Task { [weak self] in
             if delay > 0 { try? await Task.sleep(for: .milliseconds(delay)) }

@@ -160,7 +160,8 @@ extension StudyStore {
             let deadline = ContinuousClock.now + timeout
             while let store = self, ContinuousClock.now < deadline {
                 let inFront = store.workspace?.id == id
-                if inFront, store.activeSpecial == nil, store.activeFileName == nil, let document = store.document, store.reader.view?.document === document {
+                if inFront, store.activeSpecial == nil, store.activeFileName == nil, let document = store.document,
+                   let view = store.reader.view, view.document === document, view.window != nil {
                     action(store); return
                 }
                 // Neither in front nor on its way: the open failed, or the reader chose another book meanwhile.

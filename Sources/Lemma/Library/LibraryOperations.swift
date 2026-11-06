@@ -121,8 +121,37 @@ extension StudyStore {
         guard after != before else { return }
         let rescan = before.map(\.sources) != after.map(\.sources) || Set(before.map(\.id)) != Set(after.map(\.id))
         guard applyLibraryCollections(after, rescan: rescan) else { return }
-        registerLibraryUndo(name, undo: { $0.applyLibraryCollections(before, rescan: rescan) },
-                            redo: { $0.applyLibraryCollections(after, rescan: rescan) })
+        registerLibraryCollectionsUndo(name, restoring: before, replacing: after, rescan: rescan)
+    }
+
+    /// Configuration is shared across windows, whose Undo stacks are separate. An older snapshot must never
+    /// replace library edits made since then in another window; a rejected action has no Redo to register.
+    private func registerLibraryCollectionsUndo(_ name: String, restoring previous: [LibraryCollection], replacing expected: [LibraryCollection], rescan: Bool) {
+        guard let manager = libraryUndoManager else { return }
+        manager.registerUndo(withTarget: self) { [weak manager] store in
+            MainActor.assumeIsolated {
+                guard store.libraryUndoConfiguration(store.libraries.collections) == store.libraryUndoConfiguration(expected) else {
+                    let action = manager?.isRedoing == true ? "redo" : "undo"
+                    store.error = "Could not \(action) “\(name)” because the libraries changed in another window. Your current libraries were kept."
+                    return
+                }
+                guard store.applyLibraryCollections(previous, rescan: rescan) else { return }
+                store.registerLibraryCollectionsUndo(name, restoring: expected, replacing: previous, rescan: rescan)
+            }
+        }
+        manager.setActionName(name)
+    }
+
+    /// Scanning refreshes macOS bookmarks and resolves alternate spellings of the same path. Those are source
+    /// bookkeeping, not library edits, and must not make an otherwise compatible Undo fail after a scan.
+    private func libraryUndoConfiguration(_ collections: [LibraryCollection]) -> [LibraryCollection] {
+        collections.map { collection in
+            var collection = collection
+            collection.sources = collection.sources.map {
+                LibrarySource(path: $0.id, kind: $0.kind, excludedPaths: $0.excludedPaths.map(LibraryPaths.key))
+            }
+            return collection
+        }
     }
 
     @discardableResult
@@ -200,15 +229,42 @@ extension StudyStore {
         guard newPath != path || (newTitle != nil && newTitle != oldTitle) else { return newPath }
         let renamedFile = newPath != path, renamedTitle = newTitle.map { $0 != oldTitle } ?? false
         let finalTitle = newTitle ?? oldTitle, finalPath = newPath
-        registerLibraryUndo(renamedFile ? "Rename File" : "Rename", undo: { store in
-            if renamedFile { store.undoMove(from: finalPath, to: path) }
-            if renamedTitle { store.setLibraryTitle(oldTitle, path: path, bookID: bookID) }
-        }, redo: { store in
-            if renamedFile { store.undoMove(from: path, to: finalPath) }
-            if renamedTitle { store.setLibraryTitle(finalTitle, path: finalPath, bookID: bookID) }
-        })
+        registerPDFRenameUndo(renamedFile ? "Rename File" : "Rename", bookID: bookID,
+                              restoring: (path, oldTitle), replacing: (finalPath, finalTitle),
+                              movesFile: renamedFile, changesTitle: renamedTitle)
         status = renamedFile ? "Renamed “\(URL(fileURLWithPath: path).lastPathComponent)” to “\(URL(fileURLWithPath: finalPath).lastPathComponent)”." : "Renamed to “\(finalTitle)” in Lemma."
         return newPath
+    }
+
+    /// Rename histories belong to their windows, while the book's title is shared. Reject an older rename before
+    /// moving its file or replacing a newer title, and keep Undo/Redo available for the latest compatible rename.
+    private func registerPDFRenameUndo(_ name: String, bookID: String?,
+                                       restoring previous: (path: String, title: String),
+                                       replacing expected: (path: String, title: String),
+                                       movesFile: Bool, changesTitle: Bool) {
+        guard let manager = libraryUndoManager else { return }
+        manager.registerUndo(withTarget: self) { [weak manager] store in
+            MainActor.assumeIsolated {
+                let action = manager?.isRedoing == true ? "redo" : "undo"
+                guard !changesTitle || store.libraryTitle(forPath: expected.path) == expected.title else {
+                    store.error = "Could not \(action) “\(name)” because this PDF was renamed again in another window. Its current name was kept."
+                    return
+                }
+                if movesFile {
+                    do {
+                        try LibraryFileSystem.move(URL(fileURLWithPath: expected.path), to: URL(fileURLWithPath: previous.path))
+                        store.followMovedItem(from: expected.path, to: previous.path)
+                    } catch {
+                        store.error = "Could not \(action) “\(name)”: \(error.localizedDescription)"
+                        return
+                    }
+                }
+                if changesTitle { store.setLibraryTitle(previous.title, path: previous.path, bookID: bookID) }
+                store.registerPDFRenameUndo(name, bookID: bookID, restoring: expected, replacing: previous,
+                                            movesFile: movesFile, changesTitle: changesTitle)
+            }
+        }
+        manager.setActionName(name)
     }
 
     /// Renames a folder on disk, inside a library's watched folder. Books, sources and names inside it follow.

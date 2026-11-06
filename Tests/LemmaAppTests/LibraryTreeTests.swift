@@ -67,6 +67,36 @@ final class LibraryTreeTests: XCTestCase {
     // MARK: The tree
 
     @MainActor
+    func testLibraryUndoInOneWindowPreservesLibrariesCreatedInAnother() async throws {
+        let first = try await store([])
+        let app = first.app
+        defer { app.prepareForTermination() }
+        _ = app.claimWindow(nil)
+        let second = app.newWindow(); _ = app.claimWindow(second.windowID)
+        let secondUndo = UndoManager(); secondUndo.groupsByEvent = false
+        second.libraryTree.undoManager = secondUndo
+        var firstID: String?, secondID: String?
+        step(first) { firstID = first.createLibrary(title: "Window One") }
+        step(second) { secondID = second.createLibrary(title: "Window Two") }
+        let one = try XCTUnwrap(firstID), two = try XCTUnwrap(secondID)
+        XCTAssertTrue(first.libraries.collections.contains { $0.id == one })
+        XCTAssertTrue(first.libraries.collections.contains { $0.id == two })
+
+        first.libraryTree.undoManager?.undo()
+
+        XCTAssertTrue(first.libraries.collections.contains { $0.id == one }, "An older full snapshot is rejected rather than merged over newer library edits")
+        XCTAssertTrue(first.libraries.collections.contains { $0.id == two }, "Undo in one window must retain a library subsequently created in another window")
+        XCTAssertTrue(first.error?.contains("changed in another window") == true)
+        XCTAssertFalse(try XCTUnwrap(first.libraryTree.undoManager).canRedo, "A rejected Undo must not register a misleading Redo")
+        secondUndo.undo()
+        XCTAssertTrue(first.libraries.collections.contains { $0.id == one })
+        XCTAssertFalse(first.libraries.collections.contains { $0.id == two }, "The most recent compatible snapshot still supports Undo")
+        secondUndo.redo()
+        XCTAssertTrue(first.libraries.collections.contains { $0.id == one })
+        XCTAssertTrue(first.libraries.collections.contains { $0.id == two })
+    }
+
+    @MainActor
     func testTreeNestsSectionsAndSubLibrariesAndListsFoldersBeforePDFs() throws {
         let books = root.appendingPathComponent("books"), math = root.appendingPathComponent("math"), csd = root.appendingPathComponent("school/csd")
         try file("books/Novel.pdf"); try file("math/Calculus.pdf"); try file("math/poker/Theory.pdf"); try file("math/b_Algebra.pdf")

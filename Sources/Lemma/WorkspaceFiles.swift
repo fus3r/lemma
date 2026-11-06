@@ -4,11 +4,16 @@ import Observation
 
 /// One buffer per file across windows, so a later save cannot replace another window's edits.
 @MainActor @Observable
-final class WorkspaceFileBuffer: Identifiable {
-    let id: String
+final class WorkspaceFileBuffer {
+    var id: String
     var text: String
     var savedText: String
     var saveError: String?
+    var cursorLine = 1
+    var cursorColumn = 1
+    var selectedCharacters = 0
+    var findRequest = 0
+    var findAction = NSTextFinder.Action.showFindInterface.rawValue
     @ObservationIgnored var saveTask: Task<Void, Never>?
     var isDirty: Bool { text != savedText }
     var isMarkdown: Bool { (id as NSString).pathExtension.lowercased() == "md" }
@@ -80,6 +85,42 @@ extension StudyStore {
     }
 
     func saveActiveFile() { _ = activeFile?.save(in: workspaceFileRepository) }
+
+    func findInWorkspaceFile(_ action: NSTextFinder.Action = .showFindInterface) {
+        activeFile?.findAction = action.rawValue
+        activeFile?.findRequest += 1
+    }
+
+    func renameWorkspaceFile(_ name: String, to proposed: String) throws {
+        let kind: WorkspaceFileKind = (name as NSString).pathExtension.lowercased() == "md" ? .markdown : .text
+        let renamed = try workspaceFileRepository.filename(proposed, kind: kind)
+        guard renamed != name else { return }
+        if let file = app.fileBuffers[name], !file.save(in: workspaceFileRepository) {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: file.saveError ?? "Could not save the file."])
+        }
+        try workspaceFileRepository.rename(name, to: renamed)
+        if let file = app.fileBuffers.removeValue(forKey: name) {
+            file.id = renamed; app.fileBuffers[renamed] = file
+        }
+        for window in app.windows {
+            window.fileTabs = window.fileTabs.map { $0 == name ? renamed : $0 }
+            if window.activeFileName == name { window.activeFileName = renamed }
+            window.saveWorkbench()
+        }
+        refreshWorkspaceFiles()
+    }
+
+    func trashWorkspaceFile(_ name: String) {
+        do {
+            if let file = app.fileBuffers[name], !file.save(in: workspaceFileRepository) {
+                error = file.saveError; return
+            }
+            try FileManager.default.trashItem(at: workspaceFileRepository.url(for: name), resultingItemURL: nil)
+            for window in app.windows where window.fileTabs.contains(name) { window.closeWorkspaceFile(name) }
+            app.fileBuffers[name] = nil
+            refreshWorkspaceFiles()
+        } catch { self.error = "Could not move “\(name)” to Trash: \(error.localizedDescription)" }
+    }
 
     @discardableResult
     func closeWorkspaceFile(_ name: String) -> Bool {

@@ -51,6 +51,9 @@ public struct WorkspaceFileRepository: Sendable {
 
     public func read(_ name: String) throws -> String { try String(contentsOf: url(for: name), encoding: .utf8) }
     public func save(_ text: String, name: String) throws { try text.write(to: url(for: name), atomically: true, encoding: .utf8) }
+    public func rename(_ name: String, to renamed: String) throws {
+        try FileManager.default.moveItem(at: url(for: name), to: url(for: renamed))
+    }
 
     public enum FileError: LocalizedError {
         case invalidName, unsupportedType

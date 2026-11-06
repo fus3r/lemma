@@ -151,6 +151,20 @@ private struct LemmaCommands: Commands {
             Button("Look Up Definition…", action: store.lookupSelection).keyboardShortcut("l", modifiers: [.command, .shift]).disabled(store.document == nil)
             Button("Highlight Selection") { store.highlightSelection() }.keyboardShortcut("h", modifiers: [.command, .shift]).disabled(!store.reader.hasSelection)
             Button("Underline Selection") { store.highlightSelection(style: .underline) }.keyboardShortcut("u", modifiers: [.command, .shift]).disabled(!store.reader.hasSelection)
+            Menu("Highlight Color") {
+                ForEach(store.app.highlightPalette.settings.colors) { swatch in
+                    if let shortcut = swatch.shortcut {
+                        Button("Highlight with \(swatch.name)") { store.applyHighlightSwatch(swatch, style: .highlight) }
+                            .keyboardShortcut(shortcut.keyEquivalent, modifiers: shortcut.eventModifiers)
+                            .disabled(!store.canApplyHighlightColor)
+                    } else {
+                        Button("Highlight with \(swatch.name)") { store.applyHighlightSwatch(swatch, style: .highlight) }
+                            .disabled(!store.canApplyHighlightColor)
+                    }
+                }
+                Divider()
+                Button("Colors & Shortcuts…") { store.editHighlightColors() }
+            }
             Divider()
             Button("Send Selection to Lab", action: store.sendSelectionToLab).keyboardShortcut("l", modifiers: [.command, .option]).disabled(store.document == nil)
             Button("New Lab Notebook") { store.newLab() }.disabled(store.workspace == nil)
@@ -231,11 +245,17 @@ private struct LemmaCommands: Commands {
             Button("Show Testing") { store.reveal(.testing) }
             Button("Show Catalog") { store.reveal(.catalog) }.keyboardShortcut("x", modifiers: [.command, .shift])
             Divider()
-            Button("Find…") { store.find.show(store) }.keyboardShortcut("f").disabled(store.document == nil)
-            Button("Find Next") { let find = store.find; if find.isVisible, !find.query.isEmpty { find.next() } else { find.show(store) } }
-                .keyboardShortcut("g").disabled(store.document == nil)
-            Button("Find Previous") { let find = store.find; if find.isVisible, !find.query.isEmpty { find.previous() } else { find.show(store) } }
-                .keyboardShortcut("g", modifiers: [.command, .shift]).disabled(store.document == nil)
+            Button("Find…") {
+                if store.activeFile != nil { store.findInWorkspaceFile() } else { store.find.show(store) }
+            }.keyboardShortcut("f").disabled(store.document == nil && store.activeFile == nil)
+            Button("Find Next") {
+                if store.activeFile != nil { store.findInWorkspaceFile(.nextMatch) }
+                else { let find = store.find; if find.isVisible, !find.query.isEmpty { find.next() } else { find.show(store) } }
+            }.keyboardShortcut("g").disabled(store.document == nil && store.activeFile == nil)
+            Button("Find Previous") {
+                if store.activeFile != nil { store.findInWorkspaceFile(.previousMatch) }
+                else { let find = store.find; if find.isVisible, !find.query.isEmpty { find.previous() } else { find.show(store) } }
+            }.keyboardShortcut("g", modifiers: [.command, .shift]).disabled(store.document == nil && store.activeFile == nil)
             Button("Show Outline") { store.reveal(.contents) }
             Button("Show Projects") { store.reveal(.projects) }
             Menu("Layout") { ForEach(LayoutPreset.allCases) { preset in Button(preset.label) { store.applyLayout(preset) } } }

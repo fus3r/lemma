@@ -194,7 +194,10 @@ extension StudyStore {
 
     /// Opens an editor in the side group: an existing tab for the same thing comes to the front, a map replaces the map,
     /// and a page with the same title is reused. At most eight tabs stay open.
-    func showSideEditor(_ editor: SideEditor) {
+    func showSideEditor(_ editor: SideEditor, reveal: Bool = true) {
+        // Explicit side-editor actions reveal their group, which files and special editors otherwise cover.
+        // Carrying a project across a background book change only restores its tab.
+        if reveal { activeSpecial = nil; activeFileName = nil }
         if editor.isWide, !sideEditors.contains(where: \.isWide), showStudy, let window = mainWindow, window.frame.width < 1680 {
             // Page, editor and inspector do not fit side by side in a laptop-sized window: make room, and give it back on close.
             showStudy = false; labHidInspector = true
@@ -219,7 +222,10 @@ extension StudyStore {
         saveWorkbench()
     }
 
-    func activateSideEditor(_ id: String) { if sideEditors.contains(where: { $0.id == id }) { activeSideEditorID = id; saveWorkbench() } }
+    func activateSideEditor(_ id: String) {
+        guard let editor = sideEditors.first(where: { $0.id == id }) else { return }
+        showSideEditor(editor)
+    }
 
     /// The title of a side tab.
     func sideTitle(_ editor: SideEditor) -> String {

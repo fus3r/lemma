@@ -62,11 +62,12 @@ extension StudyStore {
     /// without one, the passage in view: F5.
     func startDebugging(at key: ReferenceKey? = nil, from here: (pageIndex: Int, point: CGPoint)? = nil) {
         guard document != nil else { choosePDF(); return }
-        if panelMaximized || activeSpecial != nil {
+        if panelMaximized || activeSpecial != nil || activeFileName != nil {
             // The page must be in view to place the reading line: bring the book back first, as VS Code shows the
             // editor when a debug session starts.
             panelMaximized = false
             activeSpecial = nil
+            activeFileName = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.startDebugging(at: key, from: here) }
             return
         }
@@ -117,6 +118,7 @@ extension StudyStore {
 
     func debugRestart() {
         guard var session = debug, let first = session.frames.first else { return }
+        if revealDebugReader(then: { $0.debugRestart() }) { return }
         session.frames = [DebugFrame(key: first.key, label: first.label)]
         session.steps = 0; session.finished = false
         debug = session
@@ -136,9 +138,20 @@ extension StudyStore {
         return nil
     }
 
+    /// A file or maximized panel can replace the PDF surface while a proof session stays open.
+    /// Restore that session's page before its next action, then wait for the attached reader.
+    private func revealDebugReader(then action: @escaping @MainActor (StudyStore) -> Void) -> Bool {
+        guard activeFileName != nil || activeSpecial != nil || panelMaximized, let id = workspace?.id else { return false }
+        let page = reader.rulerLine?.pageIndex ?? workspace?.reading.pageIndex ?? reader.pageNumber - 1
+        panelMaximized = false; openBook(id, atPage: page)
+        whenShowing(id, action)
+        return true
+    }
+
     /// Next line (F10).
     func debugStepOver() {
         guard debug != nil else { startDebugging(); return }
+        if revealDebugReader(then: { $0.debugStepOver() }) { return }
         guard debugLine() != nil else { return }
         reader.moveRuler(by: 1)
         debug?.steps += 1
@@ -146,7 +159,9 @@ extension StudyStore {
     }
 
     func debugStepBack() {
-        guard debug != nil, debugLine() != nil else { return }
+        guard debug != nil else { return }
+        if revealDebugReader(then: { $0.debugStepBack() }) { return }
+        guard debugLine() != nil else { return }
         reader.moveRuler(by: -1)
         debug?.steps += 1
     }
@@ -154,6 +169,7 @@ extension StudyStore {
     /// Into the result, equation or figure the line cites (F11); a line that cites nothing is stepped over.
     func debugStepInto() {
         guard debug != nil else { startDebugging(); return }
+        if revealDebugReader(then: { $0.debugStepInto() }) { return }
         guard let line = debugLine(), var session = debug else { return }
         guard let cited = citedTarget(on: line) else { debugStepOver(); return }
         session.frames[session.frames.count - 1].saved = line
@@ -171,6 +187,7 @@ extension StudyStore {
     /// Back to where the result was cited (⇧F11); from the outermost frame, to the end of the proof.
     func debugStepOut() {
         guard var session = debug else { return }
+        if revealDebugReader(then: { $0.debugStepOut() }) { return }
         if session.frames.count > 1 {
             session.frames.removeLast()
             let saved = session.frames[session.frames.count - 1].saved
@@ -188,6 +205,7 @@ extension StudyStore {
     /// and left the reader 40 pages on when nothing stopped it).
     func debugContinue() {
         guard debug != nil else { startDebugging(); return }
+        if revealDebugReader(then: { $0.debugContinue() }) { return }
         guard let document, let current = debugLine() else { return }
         let end = proofEnd(of: debug?.top.key)
         let lastPage = min(document.pageCount - 1, current.pageIndex + 40)
@@ -236,6 +254,11 @@ extension StudyStore {
     }
 
     func goToBreakpoint(_ breakpoint: LineBreakpoint) {
+        if activeFileName != nil || activeSpecial != nil || panelMaximized, let id = workspace?.id {
+            panelMaximized = false; openBook(id, atPage: breakpoint.pageIndex)
+            whenShowing(id) { $0.goToBreakpoint(breakpoint) }
+            return
+        }
         let lines = reader.readingLines(onPage: breakpoint.pageIndex)
         guard let index = lines.indices.min(by: { abs(Double(lines[$0].midY) - breakpoint.y) < abs(Double(lines[$1].midY) - breakpoint.y) }) else {
             reader.goToPage(breakpoint.pageIndex + 1); return

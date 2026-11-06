@@ -8,6 +8,7 @@ struct HighlightSwatch: Codable, Identifiable, Equatable {
     var name: String
     var color: HighlightColor
     var hex: String?
+    var shortcut: HighlightShortcut?
 
     init(_ preset: HighlightColor) {
         id = preset.rawValue; name = preset.label; color = preset
@@ -72,6 +73,12 @@ final class HighlightPalette {
 
     func save(_ draft: Settings) throws {
         guard !draft.colors.isEmpty else { return }
+        var shortcuts = Set<HighlightShortcut>()
+        for swatch in draft.colors {
+            if let shortcut = swatch.shortcut, !shortcuts.insert(shortcut).inserted {
+                throw PaletteError.duplicateShortcut(shortcut.label)
+            }
+        }
         var saved = draft
         for index in saved.colors.indices {
             let name = saved.colors[index].name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -89,6 +96,13 @@ final class HighlightPalette {
         var draft = settings
         if style == .highlight { draft.highlightID = id } else { draft.underlineID = id }
         try save(draft)
+    }
+
+    enum PaletteError: LocalizedError {
+        case duplicateShortcut(String)
+        var errorDescription: String? {
+            switch self { case .duplicateShortcut(let keys): "\(keys) is assigned to more than one color. Choose a different shortcut." }
+        }
     }
 }
 

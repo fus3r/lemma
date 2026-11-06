@@ -233,9 +233,19 @@ struct PaletteProvider {
 
     func projectCandidates() -> [PaletteCandidate] { projectItems().map(PaletteCandidate.init(item:)) }
 
+    func fileCandidates() -> [PaletteCandidate] {
+        store.workspaceFiles.map { name in
+            PaletteCandidate(id: StudyStore.fileTabID(name), title: name) { [store] in
+                PaletteItem(id: StudyStore.fileTabID(name), title: name, detail: "Workspace Files", symbol: "doc.text", category: "File") {
+                    store.openWorkspaceFile(name)
+                }
+            }
+        }
+    }
+
     /// With nothing typed: open books, then the sections around the reading position and recent notes.
     func suggestions(notes: [PaletteCandidate], books: [PaletteCandidate]) -> [PaletteItem] {
-        var items: [PaletteItem] = []
+        var items: [PaletteItem] = fileCandidates().prefix(6).map { $0.make() }
         if let current = store.breadcrumb().last, let siblings = siblings(of: current) { items += siblings.map(sectionItem) }
         items += notes.prefix(5).map { $0.make() }
         items += projectItems().prefix(3)
@@ -339,11 +349,12 @@ final class PaletteSession {
     private lazy var notes: [PaletteCandidate] = provider.noteCandidates()
     private lazy var books: [PaletteCandidate] = provider.bookCandidates()
     private lazy var projects: [PaletteCandidate] = provider.projectCandidates()
+    private lazy var files: [PaletteCandidate] = provider.fileCandidates()
 
     /// Gathers what typing will search, right after the palette appears rather than at the first keystroke.
     func prepare(mode: PaletteMode) {
         switch mode {
-        case .goTo: _ = (terms, symbols, sections, notes, books, projects, commands)
+        case .goTo: _ = (terms, symbols, sections, notes, books, projects, commands, files)
         case .commands: _ = commands
         case .symbols: _ = symbols
         case .themes: break
@@ -387,6 +398,7 @@ final class PaletteSession {
         add(symbols, weight: 1, limit: 6)
         add(sections, weight: 1, limit: 8)
         add(notes, weight: 2, limit: 6)
+        add(files, weight: 2, limit: 8)
         add(books, weight: 3, limit: 4)
         add(projects, weight: 2, limit: 4)
         add(commands, weight: 4, limit: 4)
@@ -450,7 +462,7 @@ struct CommandPaletteView: View {
         case .commands: "Type the name of a command to run."
         case .symbols: "Go to an equation, figure, table, algorithm, exercise or statement"
         case .themes: "Select Color Theme (Up/Down Keys to Preview)"
-        case .goTo: store.document == nil ? "Search books, or type > for commands" : "Search pages (64), labels ((3.41), fig 3.8), lines (64:12), terms, notes · > commands · @ symbols"
+        case .goTo: store.document == nil ? "Search files and books, or type > for commands" : "Search files, pages (64), labels ((3.41), fig 3.8), lines (64:12), terms, notes · > commands · @ symbols"
         }
     }
 
@@ -530,7 +542,7 @@ struct CommandPaletteView: View {
     }
 
     private var emptyMessage: String {
-        if store.document == nil && request.mode == .goTo { return "No matching books or commands." }
+        if store.document == nil && request.mode == .goTo { return "No matching files, books or commands." }
         if request.mode == .symbols && store.analysis?.analysis == nil { return store.analysis?.isAnalyzing == true ? "Lemma is still reading this book…" : "No numbered objects found yet." }
         if request.mode == .commands { return "No matching commands" }
         return "No matching results. Try a page number, “(3.41)”, “fig 3.8” or a term from the index."

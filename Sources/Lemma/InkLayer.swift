@@ -34,38 +34,38 @@ extension InkStroke {
 
 @MainActor
 extension StudyStore {
-    func addInk(_ stroke: InkStroke, undoManager: UndoManager?, at index: Int? = nil) {
-        guard let workspaceID = workspace?.id, let document, (0..<document.pageCount).contains(stroke.pageIndex),
-              stroke.annotation() != nil, workspace?.inkStrokes.contains(where: { $0.id == stroke.id }) == false else { return }
-        let count = workspace?.inkStrokes.count ?? 0
-        let insertionIndex = min(index ?? count, count)
-        workspace?.inkStrokes.insert(stroke, at: insertionIndex)
-        undoManager?.registerUndo(withTarget: self) { target in
-            MainActor.assumeIsolated {
-                guard target.workspace?.id == workspaceID else { return }
-                target.removeInk(id: stroke.id, undoManager: undoManager)
+    func addInk(_ stroke: InkStroke, undoManager: UndoManager?, at index: Int? = nil, bookID requestedBookID: String? = nil) {
+        guard let bookID = requestedBookID ?? workspace?.id,
+              let book = app.currentWorkspace(bookID) ?? (try? repository.load(id: bookID)),
+              (0..<(book.pageCount ?? 0)).contains(stroke.pageIndex), stroke.annotation() != nil,
+              !book.inkStrokes.contains(where: { $0.id == stroke.id }) else { return }
+        guard editAnnotations(in: bookID, { $0.inkStrokes.insert(stroke, at: min(index ?? $0.inkStrokes.count, $0.inkStrokes.count)) }) else { return }
+        if let undoManager {
+            registerPDFUndo("Draw Stroke", manager: undoManager) { target in
+                target.removeInk(id: stroke.id, undoManager: undoManager, bookID: bookID)
             }
         }
-        undoManager?.setActionName("Draw Stroke")
-        syncInk(); flush()
+        syncInk(bookID)
     }
 
-    func removeInk(id: UUID, undoManager: UndoManager?) {
-        guard let workspaceID = workspace?.id, let index = workspace?.inkStrokes.firstIndex(where: { $0.id == id }),
-              let stroke = workspace?.inkStrokes.remove(at: index) else { return }
-        undoManager?.registerUndo(withTarget: self) { target in
-            MainActor.assumeIsolated {
-                guard target.workspace?.id == workspaceID else { return }
-                target.addInk(stroke, undoManager: undoManager, at: index)
+    func removeInk(id: UUID, undoManager: UndoManager?, bookID requestedBookID: String? = nil) {
+        guard let bookID = requestedBookID ?? workspace?.id,
+              let book = app.currentWorkspace(bookID) ?? (try? repository.load(id: bookID)),
+              let index = book.inkStrokes.firstIndex(where: { $0.id == id }) else { return }
+        let stroke = book.inkStrokes[index]
+        guard editAnnotations(in: bookID, { $0.inkStrokes.removeAll { $0.id == id } }) else { return }
+        if let undoManager {
+            registerPDFUndo("Erase Stroke", manager: undoManager) { target in
+                target.addInk(stroke, undoManager: undoManager, at: index, bookID: bookID)
             }
         }
-        undoManager?.setActionName("Erase Stroke")
-        syncInk(); flush()
+        syncInk(bookID)
     }
 
-    private func syncInk() {
-        guard let document else { return }
-        reader.syncInk(workspace?.inkStrokes ?? [], in: document)
+    private func syncInk(_ bookID: String) {
+        for store in app.windows where store.workspace?.id == bookID {
+            if let document = store.document { store.reader.syncInk(store.workspace?.inkStrokes ?? [], in: document) }
+        }
     }
 
     /// Exports a fresh copy. The reader's in-memory annotations never enter the source file.

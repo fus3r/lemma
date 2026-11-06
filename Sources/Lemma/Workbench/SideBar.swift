@@ -116,7 +116,12 @@ struct ExplorerView: View {
             case ExplorerPane.open.id: VSIconButton(icon: "close-all", help: "Close All Editors", size: 16) { store.closeAllEditors() }
             case ExplorerPane.files.id:
                 VSIconButton(icon: "new-file", help: "Add New File…", size: 16) { store.beginNewFile() }
-                VSIconButton(icon: "folder-opened", help: "Show Workspace Files in Finder", size: 16) { store.revealWorkspaceFiles() }
+                VSMenuButton(icon: "ellipsis", help: "Workspace File Actions") {
+                    [.action("New File…") { store.beginNewFile() },
+                     .action("Refresh Files") { store.refreshWorkspaceFiles() },
+                     .separator,
+                     .action("Show in Finder") { store.revealWorkspaceFiles() }]
+                }
             case ExplorerPane.library.id:
                 VSIconButton(icon: "new-folder", help: "New Library…", size: 16) { store.beginNewLibrary() }
                 VSIconButton(icon: "refresh", help: "Refresh Libraries", size: 16) { store.libraries.refresh() }

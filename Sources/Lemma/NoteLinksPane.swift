@@ -214,34 +214,29 @@ extension StudyStore {
         scheduleSave()
     }
 
-    func removeNoteLink(id: UUID, undoManager: UndoManager?) {
-        guard let workspaceID = workspace?.id,
-              let index = workspace?.noteLinks.firstIndex(where: { $0.id == id }),
-              let link = workspace?.noteLinks[index] else { return }
-        workspace?.noteLinks.remove(at: index)
-        undoManager?.registerUndo(withTarget: self) { target in
-            MainActor.assumeIsolated {
+    func removeNoteLink(id: UUID, undoManager: UndoManager?, bookID requestedBookID: String? = nil) {
+        guard let workspaceID = requestedBookID ?? workspace?.id,
+              let book = app.currentWorkspace(workspaceID) ?? (try? repository.load(id: workspaceID)),
+              let index = book.noteLinks.firstIndex(where: { $0.id == id }) else { return }
+        let link = book.noteLinks[index]
+        guard editAnnotations(in: workspaceID, { $0.noteLinks.removeAll { $0.id == id } }) else { return }
+        if let undoManager {
+            registerPDFUndo("Delete Link", manager: undoManager) { target in
                 target.restoreNoteLink(link, at: index, workspaceID: workspaceID, undoManager: undoManager)
             }
         }
-        undoManager?.setActionName("Delete Link")
-        flush()
     }
 
     private func restoreNoteLink(_ link: NoteLink, at index: Int, workspaceID: String, undoManager: UndoManager?) {
-        guard workspace?.id == workspaceID,
-              linkedNote(id: link.sourceNoteID) != nil, linkedNote(id: link.targetNoteID) != nil,
-              workspace?.noteLinks.contains(where: { $0.id == link.id || ($0.sourceNoteID == link.sourceNoteID && $0.targetNoteID == link.targetNoteID && $0.kind == link.kind) }) == false else { return }
-        let insertionIndex = min(index, workspace?.noteLinks.count ?? 0)
-        workspace?.noteLinks.insert(link, at: insertionIndex)
-        undoManager?.registerUndo(withTarget: self) { target in
-            MainActor.assumeIsolated {
-                guard target.workspace?.id == workspaceID else { return }
-                target.removeNoteLink(id: link.id, undoManager: undoManager)
+        guard let book = app.currentWorkspace(workspaceID) ?? (try? repository.load(id: workspaceID)),
+              book.notes.contains(where: { $0.id == link.sourceNoteID }), book.notes.contains(where: { $0.id == link.targetNoteID }),
+              !book.noteLinks.contains(where: { $0.id == link.id || ($0.sourceNoteID == link.sourceNoteID && $0.targetNoteID == link.targetNoteID && $0.kind == link.kind) }) else { return }
+        guard editAnnotations(in: workspaceID, { $0.noteLinks.insert(link, at: min(index, $0.noteLinks.count)) }) else { return }
+        if let undoManager {
+            registerPDFUndo("Delete Link", manager: undoManager) { target in
+                target.removeNoteLink(id: link.id, undoManager: undoManager, bookID: workspaceID)
             }
         }
-        undoManager?.setActionName("Delete Link")
-        flush()
     }
 
     /// Selecting a linked note is explicit; it leaves the PDF at the current place.

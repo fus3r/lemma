@@ -214,6 +214,11 @@ struct ShortcutsEditor: View {
             ("Review: Reveal", "⌘↩", "reviewVisible"), ("Review: Grade Again · Hard · Good · Easy", "⌘1", "reviewVisible")
         ]
         for extra in extras where !seen.contains(extra.0) { rows.append(Row(id: extra.0, command: extra.0, keys: extra.1, when: extra.2, source: "Default")) }
+        for swatch in store.app.highlightPalette.settings.colors {
+            let title = "Study: Highlight with \(swatch.name)"
+            rows.removeAll { $0.command == title }
+            rows.append(Row(id: "highlight-color-\(swatch.id)", command: title, keys: swatch.shortcut?.label ?? "", when: "bookOpen && selectionOrHighlight", source: "User"))
+        }
         return rows.sorted { $0.command.localizedStandardCompare($1.command) == .orderedAscending }
     }
 
@@ -239,6 +244,13 @@ struct ReleaseNotesEditor: View {
     @Environment(\.theme) private var theme
 
     private let sections: [(String, String, [String])] = [
+        ("Lemma 3.6: annotations and reliable shared work", "edit", [
+            "Annotate PDFs with pen, boxes, ellipses, lines, arrows and eraser. Move or resize shapes, choose color, width, dash and fill, undo your edits, and export a separate annotated PDF.",
+            "Highlights fit individual lines, including mathematics. The compact palette has named colors, a shortcut for each color, and separate highlight and underline defaults.",
+            "Workspace files use a native editor with line numbers, Markdown colors, word wrap, Find/Replace and math preview. A failed save keeps your unsaved work open.",
+            "References, search results, breakpoints and proof-debugger steps bring the PDF back in front without closing your text files. Restored windows keep the editor you selected.",
+            "Shared-window fixes preserve newer library names, annotation Undo, text edits, review masks, derivation checks, Python output and queued commands."
+        ]),
         ("Lemma 3.5: windows and workspace files", "files", [
             "File › New Window (⇧⌘N) opens an empty workbench with its own tabs, layout, reading positions and Find queries. Windows restore on relaunch and share your library and annotation edits. Thanks to Songlan Nie for the multi-window approach.",
             "File › Add New File… creates text and Markdown files without a PDF. Files have their own tabs, automatic saving, ⌘S, Markdown and math preview, and a Workspace Files list for reopening them.",

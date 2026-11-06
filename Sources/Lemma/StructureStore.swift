@@ -85,6 +85,14 @@ extension StudyStore {
     /// Goes to the earliest open “?” mark.
     func resumeAtFirstMark() {
         guard let first = openMarks.first else { status = "No open “?” marks."; return }
+        if activeFileName != nil || activeSpecial != nil || panelMaximized, let id = workspace?.id {
+            panelMaximized = false; openBook(id, atPage: first.anchor.pageIndex)
+            whenShowing(id) { store in
+                store.reader.go(to: first.anchor)
+                store.reader.flash(first.anchor.region.rect, onPage: first.anchor.pageIndex)
+            }
+            return
+        }
         reader.go(to: first.anchor)
         reader.flash(first.anchor.region.rect, onPage: first.anchor.pageIndex)
     }
@@ -219,8 +227,9 @@ extension StudyStore {
     func goToKey(_ key: ReferenceKey) {
         if let target = analysis?.target(for: key) ?? references?.knownTarget(key) { goToReference(target); return }
         if key.kind == .section || key.kind == .chapter, let entry = outline.flatMap(\.flattened).first(where: { OutlineMap.numberPrefix(of: $0.title) == key.number }),
-           let pageIndex = entry.pageIndex {
-            reader.goToPage(pageIndex + 1)
+           let pageIndex = entry.pageIndex, let id = workspace?.id {
+            panelMaximized = false
+            openBook(id, atPage: pageIndex)
         }
     }
 
@@ -290,6 +299,11 @@ extension StudyStore {
     /// Goes to the sentence that says what a symbol stands for, outlined briefly, with Back available.
     func goToSymbolDefinition(_ definition: SymbolDefinition) {
         guard let page = document?.page(at: definition.pageIndex) else { return }
+        if activeFileName != nil || activeSpecial != nil || panelMaximized, let id = workspace?.id {
+            panelMaximized = false; openBook(id, atPage: definition.pageIndex)
+            whenShowing(id) { $0.goToSymbolDefinition(definition) }
+            return
+        }
         let length = min(80, max(1, ((page.string ?? "") as NSString).length - definition.location))
         guard let selection = page.selection(for: NSRange(location: definition.location, length: length)) else { reader.goToPage(definition.pageIndex + 1); return }
         let rect = selection.selectionsByLine().first?.bounds(for: page) ?? selection.bounds(for: page)

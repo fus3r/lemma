@@ -224,7 +224,8 @@ extension StudyStore {
 
     /// Opens a match: its book, its page, the words selected.
     func openSearchHit(_ hit: LibraryTextSearch.Hit) {
-        if workspace?.id != hit.bookID { openBook(hit.bookID) }
+        // The retained book may be behind a text file: selecting its result also brings its PDF tab forward.
+        openBook(hit.bookID)
         let select = { [weak self] in
             guard let self, self.workspace?.id == hit.bookID, let page = self.document?.page(at: hit.pageIndex), let view = self.reader.view else { return }
             if let selection = page.selection(for: hit.range) {
@@ -233,7 +234,6 @@ extension StudyStore {
                 self.reader.updateSelection()
             } else { self.reader.goToPage(hit.pageIndex + 1) }
         }
-        if activeSpecial != nil { activeSpecial = nil }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { MainActor.assumeIsolated { select() } }
     }
 }

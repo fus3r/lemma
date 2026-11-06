@@ -16,23 +16,24 @@ struct HighlightDrag {
 @MainActor
 extension RegionPDFView {
     func highlightHit(at local: CGPoint) -> StudyHighlight? {
-        guard controller?.showAnnotations == true, let book = controller?.owner?.workspace,
+        guard let controller, controller.showAnnotations, let book = controller.owner?.workspace,
               let page = page(for: local, nearest: false), let document else { return nil }
         let pageIndex = document.index(for: page), point = convert(local, to: page)
         return book.highlights.reversed().first { highlight in
-            highlight.pageIndex == pageIndex && highlight.regions.contains { $0.rect.insetBy(dx: -1, dy: -1).contains(point) }
+            highlight.pageIndex == pageIndex && controller.highlightBounds(for: highlight, on: page)
+                .contains { $0.insetBy(dx: -1, dy: -1).contains(point) }
         }
     }
 
     /// Only a drag starting on an existing mark is intercepted; ordinary Shift-selection elsewhere stays PDFKit's.
     func beginHighlightExtension(with event: NSEvent) -> Bool {
         guard event.modifierFlags.contains(.shift), event.modifierFlags.isDisjoint(with: [.command, .control, .option]),
-              controller?.regionMode != true, controller?.inkMode != true,
-              let bookID = controller?.owner?.workspace?.id,
+              let controller, !controller.regionMode, !controller.inkMode,
+              let bookID = controller.owner?.workspace?.id,
               let highlight = highlightHit(at: convert(event.locationInWindow, from: nil)),
               let page = document?.page(at: highlight.pageIndex) else { return false }
-        let ranges = highlight.regions.flatMap { region -> [NSRange] in
-            guard let selection = page.selection(for: region.rect) else { return [] }
+        let ranges = controller.highlightBounds(for: highlight, on: page).flatMap { rect -> [NSRange] in
+            guard let selection = page.selection(for: rect) else { return [] }
             return (0..<selection.numberOfTextRanges(on: page)).map { selection.range(at: $0, on: page) }
                 .filter { $0.location != NSNotFound && $0.length > 0 }
         }
@@ -42,7 +43,7 @@ extension RegionPDFView {
         let character = page.characterIndex(at: convert(local, to: page))
         highlightDrag = HighlightDrag(bookID: bookID, original: highlight, range: NSRange(location: lower, length: upper - lower),
                                       movesStart: character < lower + (upper - lower) / 2, start: local)
-        controller?.activeHighlightID = highlight.id
+        controller.activeHighlightID = highlight.id
         window?.makeFirstResponder(self)
         NSCursor.resizeLeftRight.set()
         return true

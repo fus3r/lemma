@@ -102,6 +102,42 @@ final class AssistantFlowTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testClosingTheLastQuestionWindowDoesNotLoseAnotherWindowsAnswer() async throws {
+        let (first, root, source) = try fixture()
+        defer { first.questions.shutdown(); first.app.prepareForTermination() }
+        first.questions.executableOverrides[.codex] = try mockCLI(root, provider: .codex, slow: true)
+        first.questions.executableOverrides[.claudeCode] = try mockCLI(root, provider: .claudeCode)
+        let noteID = try XCTUnwrap(first.currentNote?.id)
+        first.askWeb(mode: .askAndSave, content: try content(first), noteID: noteID, provider: .codex)
+        let firstJob = try XCTUnwrap(first.questions.jobs.first)
+        try await wait { firstJob.process != nil }
+
+        var second: StudyStore? = StudyStore(app: first.app, windowID: UUID())
+        weak var closedWindow = second
+        let other = root.appendingPathComponent("other-window.pdf")
+        let pdf = try XCTUnwrap(PDFDocument(url: source))
+        pdf.documentAttributes = [PDFDocumentAttribute.titleAttribute: "Another window"]
+        XCTAssertTrue(pdf.write(to: other))
+        second!.open(other)
+        second!.reader.selection = (0, CGRect(x: 20, y: 35, width: 240, height: 60), "X transpose X")
+        second!.addNote(); second!.updateNote { $0.question = "Another question" }
+        second!.askWeb(mode: .askAndSave, content: try content(second!), noteID: try XCTUnwrap(second!.currentNote?.id), provider: .claudeCode)
+        let secondJob = try XCTUnwrap(first.questions.jobs.first)
+        try await wait { secondJob.finished }
+        second!.flush(); second = nil
+        try await wait { closedWindow == nil }
+        try await wait { firstJob.finished }
+        first.pollBrowser()
+        XCTAssertEqual(try first.mailbox.result(firstJob.id)?.status, "complete", "A completed answer must be written even after the last question's window closes.")
+        XCTAssertNil(first.currentNote?.pendingRequestID)
+        XCTAssertEqual(first.currentNote?.explanation?.body, "Full rank gives uniqueness: $X^\\top X$.")
+        first.questions.retry(firstJob)
+        XCTAssertNotEqual(first.questions.jobs.first?.id, firstJob.id, "Ask Again still works after the last question's window closed.")
+        XCTAssertEqual(first.currentNote?.pendingRequestID, first.questions.jobs.first?.id)
+        first.cancelQuestion(noteID: noteID)
+    }
+
     /// Lemma used to reject anything but a subscription login. Every sign-in the CLI supports is now used as it is.
     @MainActor
     func testCLIsSignedInWithAnAPIKeyAreUsedAndSignedOutOnesExplain() async throws {

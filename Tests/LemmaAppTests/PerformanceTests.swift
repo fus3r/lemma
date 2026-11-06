@@ -31,9 +31,13 @@ final class PerformanceTests: XCTestCase {
             UserDefaults.standard.set(previous, forKey: "lastWorkspaceID")
             UserDefaults.standard.set(previousTabs, forKey: "openTabs")
         }
-        store.open(URL(fileURLWithPath: pdf))
+        let opened = await withCheckedContinuation { continuation in
+            store.openFile(URL(fileURLWithPath: pdf), then: { continuation.resume(returning: $0) })
+        }
+        XCTAssertTrue(opened, "The PDF must finish opening before its minimap is measured")
+        let document = try XCTUnwrap(store.document)
         view.controller = store.reader; store.reader.view = view
-        view.displayMode = .singlePageContinuous; view.displayDirection = .vertical; view.document = store.document
+        view.displayMode = .singlePageContinuous; view.displayDirection = .vertical; view.document = document
         view.autoScales = false; view.scaleFactor = 1.2
         minimap.controller = store.reader; minimap.colors = ThemeManager.shared.colors; minimap.attach()
         let coordinator = PDFReaderSurface.Coordinator(controller: store.reader)
@@ -70,7 +74,8 @@ final class PerformanceTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(350))
         store.flush()
         let visible = view.visiblePages.map { store.document!.index(for: $0) }
-        XCTAssertTrue(visible.contains(store.workspace!.reading.pageIndex))
+        XCTAssertTrue(visible.contains(store.workspace!.reading.pageIndex),
+                      "Saved page \(store.workspace!.reading.pageIndex), visible pages \(visible), reader page \(store.reader.pageNumber), destination \(view.currentDestination?.page.map { store.document!.index(for: $0) } ?? -1)")
         try JSONSerialization.data(withJSONObject: ["burst_input_ms": burst, "release_ms": releaseMS,
             "paced_input_ms": paced, "reading_callbacks": pages.count, "distinct_pages": Set(pages).count,
             "final_page": store.reader.pageNumber, "visible_pages": visible, "saved_page": store.workspace!.reading.pageIndex],
@@ -79,7 +84,7 @@ final class PerformanceTests: XCTestCase {
 
     /// Cold page metadata is part of scrolling even when the PDF tiles themselves are already warm.
     @MainActor
-    func testMeasureColdPageMetadata() throws {
+    func testMeasureColdPageMetadata() async throws {
         let env = ProcessInfo.processInfo.environment
         guard let support = env["LEMMA_PERF_SUPPORT"], let pdf = env["LEMMA_PERF_PDF"], let output = env["LEMMA_PERF_OUTPUT"] else {
             throw XCTSkip("Opt-in real-book scroll measurements.")
@@ -93,7 +98,10 @@ final class PerformanceTests: XCTestCase {
             UserDefaults.standard.set(previous, forKey: "lastWorkspaceID")
             UserDefaults.standard.set(previousTabs, forKey: "openTabs")
         }
-        store.open(URL(fileURLWithPath: pdf))
+        let opened = await withCheckedContinuation { continuation in
+            store.openFile(URL(fileURLWithPath: pdf), then: { continuation.resume(returning: $0) })
+        }
+        XCTAssertTrue(opened, "The PDF must finish opening before its page metadata is measured")
         let document = try XCTUnwrap(store.document)
         let view = RegionPDFView(frame: CGRect(x: 0, y: 0, width: 640, height: 760))
         view.controller = store.reader; store.reader.view = view; view.document = document
@@ -136,7 +144,10 @@ final class PerformanceTests: XCTestCase {
         }
         var metrics: [String: Any] = [:]
         let start = CACurrentMediaTime()
-        store.open(URL(fileURLWithPath: pdf))
+        let opened = await withCheckedContinuation { continuation in
+            store.openFile(URL(fileURLWithPath: pdf), then: { continuation.resume(returning: $0) })
+        }
+        XCTAssertTrue(opened, "The PDF must finish opening before its reader and editor are measured")
         metrics["open_ms"] = (CACurrentMediaTime() - start) * 1000
         let document = try XCTUnwrap(store.document)
         metrics["pages"] = document.pageCount

@@ -42,7 +42,11 @@ struct VSStatusBar: View {
                     Spacer(minLength: 8)
                     MessageStatusItem(store: store)
                     if let file = store.activeFile {
-                        StatusItem(icon: nil, text: file.isMarkdown ? "Markdown · UTF-8" : "Plain Text · UTF-8") {}
+                        StatusItem(icon: nil, text: "Ln \(file.cursorLine), Col \(file.cursorColumn)" + (file.selectedCharacters > 0 ? " (\(file.selectedCharacters) selected)" : "")) {}
+                        StatusItem(icon: nil, text: "Spaces: 4") {}
+                        StatusItem(icon: nil, text: "UTF-8") {}
+                        StatusItem(icon: nil, text: file.text.contains("\r\n") ? "CRLF" : "LF") {}
+                        StatusItem(icon: file.icon, text: file.isMarkdown ? "Markdown" : "Plain Text") {}
                     } else if !empty && store.activeSpecial == nil {
                         PagePositionStatusItem(store: store)
                         PhysicalPageStatusItem(store: store)

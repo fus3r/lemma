@@ -4,6 +4,17 @@ The detailed notes written for each version before 3.0 are in [docs/HISTORY.md](
 
 ## Unreleased
 
+## 3.6.0 (November 2026)
+
+- Annotate PDFs with the shared toolbox: pen, boxes, ellipses, lines, arrows and eraser; custom colors, widths, dashed outlines and translucent fills; move and resize shapes, Undo/Redo, and export a separate annotated PDF. Saved notes open in Preview, with Edit explicit.
+- Highlight geometry follows individual text lines, including mathematical scripts, adjacent lines, columns and rotated pages. Drawing, hit testing, resizing and PDF export use the same bounds.
+- A compact, named highlight palette with configurable shortcuts for each color and separate highlight/underline defaults. Existing marks retain their saved colors.
+- A native workspace text editor with line numbers, Markdown syntax colors, word wrap, Find/Replace, and math preview beside the file. Shared file buffers stay synchronized, and failed saves keep unsaved work open when closing a file, window or the app.
+- Search results, statement references, symbol definitions, breakpoints, the first “?” and active proof-debugger actions reveal their PDF when a text file or another editor is in front. Files retain their tabs and text; session restoration preserves the chosen foreground editor.
+- Undo for annotations and note links retains the originating book across windows and closed tabs. Shared text synchronization clears stale native Undo positions; library and PDF-rename Undo preserve newer changes from another window. Erasing respects the Original edition's hidden ink.
+- Review follows deleted cards, newly due cards and cloze-mask edits in other windows. Shared derivation edits invalidate obsolete check results and refresh open views and exports. The page inspector follows viewport and foreground-editor changes.
+- Python output and variables remain available when another window still uses the book. Clearing console output keeps queued commands, and a notebook opened explicitly is brought into view. Closing another question window preserves pending answers and retries.
+
 ## 3.5.0 (November 2026)
 
 - Add standalone text and Markdown files with File › Add New File…, the Explorer and the command palette. Files have their own tabs, automatic saving, ⌘S, Markdown/math preview, Finder access and session restoration in both interface styles. Workspace Files retains closed documents, and windows share live file edits.

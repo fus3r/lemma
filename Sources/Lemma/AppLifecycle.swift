@@ -20,7 +20,7 @@ final class AppLifecycle: NSObject {
         // must not end Lemma: the write fails with EPIPE instead of the process receiving SIGPIPE.
         signal(SIGPIPE, SIG_IGN)
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { AppLifecycle.shared.app?.prepareForTermination() }
+            MainActor.assumeIsolated { _ = AppLifecycle.shared.app?.prepareForTermination() }
         })
         // Closing the reader window saves at once, rather than when Lemma eventually quits.
         observers.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { notification in
@@ -66,7 +66,7 @@ final class AppLifecycle: NSObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { MainActor.assumeIsolated { self.quit(attempt: attempt + 1) } }
             return
         }
-        app?.prepareForTermination()
+        guard app?.prepareForTermination() != false else { return }
         NSApp.terminate(nil)
     }
 }

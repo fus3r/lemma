@@ -68,6 +68,7 @@ extension StudyStore {
         if activeSpecial == editor {
             if workspace != nil { activeSpecial = nil }
             else { activeSpecial = specialTabs.isEmpty ? nil : specialTabs[max(0, index - 1)] }
+            if activeSpecial == nil, workspace == nil, let name = fileTabs.last { openWorkspaceFile(name) }
         }
         saveWorkbench()
     }

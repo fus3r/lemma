@@ -230,8 +230,18 @@ final class AppModel {
         }
     }
 
-    func prepareForTermination() {
-        guard !quitting else { return }
+    @discardableResult
+    func prepareForTermination() -> Bool {
+        guard !quitting else { return true }
+        // Closing a file already preserves failed saves. Quit must do the same, including a buffer whose window
+        // was closed earlier, before stopping services or discarding the only copy of its edits.
+        for file in fileBuffers.values where !file.save(in: workspaceFileRepository) {
+            let store = windows.first { $0.fileTabs.contains(file.id) } ?? front
+            store.openWorkspaceFile(file.id)
+            store.error = file.saveError
+            if store.hasWindow { show(store) } else { requestWindow(store) }
+            return false
+        }
         quitting = true
         questions.shutdown()
         lab.shutdownAll()
@@ -241,6 +251,7 @@ final class AppModel {
         saveWindows()
         BookAnalysisModel.terminateHelpers()
         repository.writer.waitUntilIdle()
+        return true
     }
 
     func dismissSheets() { for store in windows { store.dismissSheets() } }

@@ -404,6 +404,7 @@ final class StudyStore {
             } catch { return failOpen(url, error, scoped: scoped, quiet: quiet, then: then) }
         }
         let opening = OpeningFile(url: url)
+        let initialMainTabID = activeMainTabID
         openingFile = opening
         status = opening.message
         opening.reminder = Task { [weak self] in
@@ -430,7 +431,15 @@ final class StudyStore {
             self.openingFile = nil
             if self.status.hasPrefix("Opening “\(opening.title)”") { self.status = "" }
             switch result {
-            case let .success(fingerprint): self.finishOpen(url, fingerprint: fingerprint, scoped: scoped, toSide: toSide, quiet: quiet, then: then)
+            case let .success(fingerprint):
+                // A restored file or Settings tab can appear while the PDF is read. Completing that read must not
+                // replace the editor chosen since the request began.
+                let chosenEditor = self.activeMainTabID != initialMainTabID
+                    ? self.activeFileName.map(Self.fileTabID) ?? self.activeSpecial?.id : nil
+                self.finishOpen(url, fingerprint: fingerprint, scoped: scoped, toSide: toSide, quiet: quiet) { opened in
+                    if opened, let chosenEditor { self.activateMainTab(chosenEditor) }
+                    then?(opened)
+                }
             case let .failure(error): self.failOpen(url, error, scoped: scoped, quiet: quiet, then: then)
             }
         }
@@ -635,6 +644,7 @@ final class StudyStore {
         self.selectedNoteID = workspace.notes.first?.id
         studySection = workspace.notes.isEmpty ? .page : workspace.notes.first?.kind.isGlossary == true ? .glossary : .notes
         resetReaderModes()
+        reader.restorePageFocus(min(max(workspace.reading.pageIndex, 0), max(pdf.pageCount - 1, 0)))
         referencePeek = nil; quickAsk = nil; definitionLookup = nil; ocrCapture = nil; paperLookups = [:]
         sideEditors = []; activeSideEditorID = nil; referencesQuery = nil
         hierarchyKey = nil; readingStatementCache = nil
@@ -670,7 +680,7 @@ final class StudyStore {
         refreshIndex()
         status = ""
         restoreBookEditors(workspace)
-        if let projectEditor, project(projectEditor)?.archived == false { showSideEditor(.project(projectEditor)) }
+        if let projectEditor, project(projectEditor)?.archived == false { showSideEditor(.project(projectEditor), reveal: false) }
         bringToFrontOfLibrary(workspace)
         // Written in the background: a reopened book usually changes only its reading position and the time it was opened.
         save(wait: false)
@@ -759,7 +769,10 @@ final class StudyStore {
     private func release(_ id: String) {
         referenceIndexes.removeValue(forKey: id)?.saveIfNeeded()
         analyses.removeValue(forKey: id)?.cancel()
-        lab.shutdown(workspaceID: id)
+        // Python is shared by all windows of this book; only its last open tab releases the kernels.
+        if !app.windows.contains(where: { $0 !== self && $0.tabs.contains { $0.id == id } }) {
+            lab.shutdown(workspaceID: id)
+        }
         documents[id] = nil
         recentDocuments.removeAll { $0 == id }
         outlineCache[id] = nil
@@ -771,18 +784,24 @@ final class StudyStore {
     private func showFirstOpenable(_ candidates: [String], skipped: [String] = []) {
         var skipped = skipped
         var remaining = candidates[...]
+        let visibleFile = activeFileName, visibleSpecial = activeSpecial
+        let keepVisibleEditor = { [weak self] in
+            guard let self, self.activeFileName == nil, self.activeSpecial == nil else { return }
+            if let visibleFile, self.fileTabs.contains(visibleFile) { self.openWorkspaceFile(visibleFile) }
+            else if let visibleSpecial, self.specialTabs.contains(visibleSpecial) { self.openSpecial(visibleSpecial) }
+        }
         while let id = remaining.popFirst() {
             let title = tabs.first { $0.id == id }?.title ?? library.first { $0.id == id }?.title ?? "A book"
             let rest = Array(remaining)
             var synchronous = true
             let outcome = activateBook(id, quiet: true) { [weak self] opened in
                 guard !synchronous, let self else { return }
-                if opened { self.reportClosedTabs(skipped) }
+                if opened { keepVisibleEditor(); self.reportClosedTabs(skipped) }
                 else { self.dropTab(id); self.showFirstOpenable(rest, skipped: skipped + [title]) }
             }
             synchronous = false
             switch outcome {
-            case .opened: reportClosedTabs(skipped); return
+            case .opened: keepVisibleEditor(); reportClosedTabs(skipped); return
             case .pending:
                 // The closed book leaves the editor while the next one is read from its file.
                 unloadBook(keepingSideBar: true)
@@ -822,7 +841,7 @@ final class StudyStore {
         workspace = nil; document = nil; selectedNoteID = nil; outline = []
         savedSnapshot = nil
         sideEditors = []; activeSideEditorID = nil; referencesQuery = nil
-        if let projectEditor { showSideEditor(.project(projectEditor)) }
+        if let projectEditor { showSideEditor(.project(projectEditor), reveal: false) }
         status = ""; browserStatus = ""
         if !keepingSideBar, navigatorSection != .search { navigatorSection = .library }
         if windowID == AppModel.primaryWindowID { UserDefaults.standard.removeObject(forKey: "lastWorkspaceID") }
@@ -1122,6 +1141,11 @@ final class StudyStore {
     }
 
     func goToReference(_ target: ReferenceTarget) {
+        if activeFileName != nil || activeSpecial != nil || panelMaximized, let id = workspace?.id {
+            panelMaximized = false; openBook(id, atPage: target.pageIndex)
+            whenShowing(id) { $0.goToReference(target) }
+            return
+        }
         reader.go(to: target)
     }
 
@@ -1173,7 +1197,11 @@ final class StudyStore {
             self.selectNote(note.id); self.noteQuery = ""; self.noteFilter = .all
             self.whenShowing(book.id) { $0.reader.go(to: note.anchor) }
         }
-        if workspace?.id == book.id { show(); return }
+        if workspace?.id == book.id {
+            panelMaximized = false
+            openBook(book.id, atPage: note.anchor.pageIndex)
+            show(); return
+        }
         reopenBook(book) { [weak self] opened in
             guard opened, let self, self.workspace?.id == book.id else { return }
             // A book shown for the first time opens straight at the note rather than at its last position.

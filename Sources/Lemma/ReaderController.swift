@@ -109,7 +109,8 @@ final class ReaderController {
         view?.refreshCaptureOverlay()
         if showReferenceLinks { references?.prefetch(around: pageNumber - 1) }
     }
-    var showAnnotations = true { didSet { if !showAnnotations { activeShapeID = nil; view?.cancelShapeGesture() } } }
+    // Viewing the original ends drawing so the eraser cannot remove hidden handwriting.
+    var showAnnotations = true { didSet { if !showAnnotations { inkMode = false } } }
     var recallMask: SourceAnchor? { didSet { view?.updateOverlay() } }
     /// Cloze parts of the recall source; when empty the whole source region is hidden.
     var recallMaskRegions: [PageRegion] = [] { didSet { view?.updateOverlay() } }
@@ -273,6 +274,9 @@ final class ReaderController {
     private var appliedHighlights: [StudyHighlight] = []
     private var highlightAnnotations: [UUID: [PDFAnnotation]] = [:]
     private weak var annotatedDocument: PDFDocument?
+    @ObservationIgnored private weak var highlightGeometryDocument: PDFDocument?
+    @ObservationIgnored private var highlightGeometry: [Int: HighlightGeometry] = [:]
+    @ObservationIgnored private var highlightFonts = InkFontCache()
     @ObservationIgnored private var marking: Task<Void, Never>?
 
     func previousPage() { view?.goToPreviousPage(nil) }
@@ -414,6 +418,26 @@ final class ReaderController {
             if self?.flash?.pageIndex == pageIndex, self?.flash?.rect == rect { self?.flash = nil }
         }
     }
+    /// Calculated once per annotated page, in PDF coordinates: scrolling and zooming need no text measurements.
+    /// Stored regions remain intact; old marks and exported copies use the same fitted geometry as new marks.
+    func highlightBounds(for highlight: StudyHighlight, on page: PDFPage) -> [CGRect] {
+        highlightBounds(for: highlight.regions.map(\.rect), on: page)
+    }
+
+    func highlightBounds(for regions: [CGRect], on page: PDFPage) -> [CGRect] {
+        if highlightGeometryDocument !== page.document {
+            highlightGeometry = [:]; highlightFonts = InkFontCache(); highlightGeometryDocument = page.document
+        }
+        let index = page.document?.index(for: page) ?? 0
+        let geometry: HighlightGeometry
+        if let cached = highlightGeometry[index] { geometry = cached }
+        else {
+            geometry = HighlightGeometry(page: page, fonts: highlightFonts)
+            highlightGeometry[index] = geometry
+        }
+        return geometry.rects(for: regions)
+    }
+
     /// Highlights and underlines as annotations of the reader's pages. The arrays come from every SwiftUI update of the
     /// reader: the same array as last time (same storage) is not compared, and a change re-annotates only the highlights
     /// added, removed or edited.
@@ -433,8 +457,7 @@ final class ReaderController {
         for highlight in visible where highlightAnnotations[highlight.id] == nil {
             guard let page = document.page(at: highlight.pageIndex) else { continue }
             var annotations: [PDFAnnotation] = []
-            for region in highlight.regions {
-                let rect = CGRect(x: region.x, y: region.y, width: region.width, height: region.height)
+            for rect in highlightBounds(for: highlight, on: page) {
                 let annotation = PDFAnnotation(bounds: rect, forType: highlight.style == .underline ? .underline : .highlight, withProperties: nil)
                 annotation.color = highlight.style == .underline ? highlight.nativeColor.withAlphaComponent(0.95) : highlight.nativeColor
                 annotation.quadrilateralPoints = [CGPoint(x: 0, y: rect.height), CGPoint(x: rect.width, y: rect.height), .zero, CGPoint(x: rect.width, y: 0)].map { NSValue(point: $0) }
@@ -502,6 +525,13 @@ final class ReaderController {
         }
     }
 
+    /// A file editor can keep the source inspector visible before its PDF view has been created.
+    func restorePageFocus(_ pageIndex: Int) {
+        settling?.cancel()
+        focusPageIndex = pageIndex
+        settledPageIndex = pageIndex
+    }
+
     /// Profiling: moves the published line by one, as a scroll to the next line would (QA copies only).
     func qaStepLine() {
         exactFocusLine = (exactFocusLine ?? 0) + 1
@@ -536,9 +566,13 @@ final class ReaderController {
         let point = CGPoint(x: view.bounds.midX, y: view.isFlipped ? view.bounds.minY + view.bounds.height * 0.3 : view.bounds.maxY - view.bounds.height * 0.3)
         if let page = view.page(for: point, nearest: true) {
             let index = document.index(for: page)
-            if index != focusPageIndex { focusPageIndex = index }
+            if index != focusPageIndex {
+                focusPageIndex = index
+                // PDFKit also updates the viewport while staying on the same page. Restarting the
+                // delay on every notification can leave the inspector on the previous page indefinitely.
+                settle()
+            }
             setFocus(y: view.convert(point, to: page).y)
-            if index != settledPageIndex { settle() }
         }
         let range = view.visiblePageIndexes()
         if range != visiblePageRange { visiblePageRange = range }

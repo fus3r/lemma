@@ -24,7 +24,14 @@ struct ReviewPane: View {
             if let note { card(note) } else { overview }
         }
         .onAppear { if noteID == nil { noteID = due.first?.id }; syncMask() }
+        .onChange(of: due.map(\.id)) { _, _ in
+            guard note == nil else { return }
+            practising = false; revealed = false
+            noteID = due.first?.id
+        }
         .onChange(of: noteID) { _, _ in revealed = false; syncMask() }
+        .onChange(of: note?.id) { _, _ in syncMask() }
+        .onChange(of: note?.masks) { _, _ in syncMask() }
         .onChange(of: revealed) { _, _ in syncMask() }
         .onChange(of: store.workspace?.id) { _, _ in noteID = due.first?.id; practising = false; revealed = false }
         .onDisappear { store.reader.recallMask = nil; store.reader.recallMaskRegions = [] }

@@ -7,6 +7,88 @@ import LemmaCore
 /// 0.8: the Lab beside the page, reading time, the page inspector and hover previews.
 final class LabFlowTests: XCTestCase {
     @MainActor
+    func testOpeningLabFromPageInspectorRevealsItOverAWorkspaceFile() async throws {
+        let previousStyle = ThemeManager.shared.style
+        ThemeManager.shared.style = .classic
+        defer { ThemeManager.shared.style = previousStyle }
+        let fixture = try WorkbenchFixture(hosted: true), store = fixture.store
+        defer { store.app.prepareForTermination(); fixture.close() }
+        store.open(fixture.book)
+        try await fixture.settle(150)
+        let name = try store.createWorkspaceFile(name: "Working notes", kind: .text)
+        let file = try XCTUnwrap(store.activeFile)
+        store.updateWorkspaceFile(file, text: "Keep these notes")
+        store.showPanel = false
+        try await fixture.settle(100)
+
+        // The retained Page inspector's Lab button uses this exact action for its source page.
+        let notebookID = try XCTUnwrap(store.newLab(source: store.pageSource(2)))
+        try await fixture.settle(200)
+        func hasNotebookEditor(_ view: NSView) -> Bool {
+            view is LabTextView || view.subviews.contains(where: hasNotebookEditor)
+        }
+        XCTAssertNil(store.activeFileName, "Explicitly opening a notebook reveals the PDF and side editor group")
+        XCTAssertEqual(store.openLabID, notebookID)
+        XCTAssertEqual(store.openLab?.source?.pageIndex, 2)
+        XCTAssertTrue(hasNotebookEditor(try XCTUnwrap(fixture.window.contentView)), "The notebook must actually be hosted, not merely selected behind the file")
+        XCTAssertTrue(store.fileTabs.contains(name))
+        XCTAssertEqual(file.text, "Keep these notes")
+
+        store.openWorkspaceFile(name)
+        try await fixture.settle(100)
+        XCTAssertEqual(store.activeFileName, name)
+        store.activateSideEditor("lab:\(notebookID)")
+        try await fixture.settle(200)
+        XCTAssertNil(store.activeFileName, "Selecting an existing side tab also reveals its editor")
+        XCTAssertTrue(hasNotebookEditor(try XCTUnwrap(fixture.window.contentView)))
+        XCTAssertNil(store.lab.sessions[notebookID], "Revealing a notebook never runs its cells")
+    }
+
+    @MainActor
+    func testAddingPassagesAndExplanationCodeRevealsTheExistingNotebook() async throws {
+        let previousStyle = ThemeManager.shared.style
+        ThemeManager.shared.style = .classic
+        defer { ThemeManager.shared.style = previousStyle }
+        let fixture = try WorkbenchFixture(hosted: true), store = fixture.store
+        defer { store.app.prepareForTermination(); fixture.close() }
+        store.open(fixture.book)
+        try await fixture.settle(100)
+        let notebookID = try XCTUnwrap(store.newLab(title: "Existing notebook"))
+        let initialCells = try XCTUnwrap(store.lab(notebookID)).cells.count
+        let fileName = try store.createWorkspaceFile(name: "Working notes", kind: .text)
+        let file = try XCTUnwrap(store.activeFile)
+        store.updateWorkspaceFile(file, text: "Keep these notes")
+        store.reader.selection = (1, CGRect(x: 70, y: 660, width: 400, height: 30), "A passage to investigate.")
+        store.reader.hasSelection = true
+        store.addNote()
+        let note = try XCTUnwrap(store.currentNote)
+        store.updateNote(id: note.id) { $0.explanation = SavedExplanation(body: "```python\nprint(42)\n```") }
+
+        store.sendSelectionToLab()
+        try await fixture.settle(150)
+        XCTAssertNil(store.activeFileName, "Sending a passage reveals the existing notebook receiving it")
+        XCTAssertEqual(store.openLabID, notebookID)
+        XCTAssertGreaterThan(try XCTUnwrap(store.lab(notebookID)).cells.count, initialCells)
+        func hasNotebookEditor(_ view: NSView) -> Bool {
+            view is LabTextView || view.subviews.contains(where: hasNotebookEditor)
+        }
+        XCTAssertTrue(hasNotebookEditor(try XCTUnwrap(fixture.window.contentView)))
+
+        store.openWorkspaceFile(fileName)
+        XCTAssertEqual(store.activeFileName, fileName)
+        store.openExplanationCode(noteID: note.id)
+        try await fixture.settle(150)
+        XCTAssertNil(store.activeFileName, "Opening explanation code reveals the notebook receiving it")
+        XCTAssertEqual(store.openLabID, notebookID)
+        XCTAssertEqual(store.lab(notebookID)?.cells.last?.source, "print(42)")
+        XCTAssertTrue(hasNotebookEditor(try XCTUnwrap(fixture.window.contentView)))
+        XCTAssertEqual(store.workspace?.labs.count, 1)
+        XCTAssertTrue(store.fileTabs.contains(fileName))
+        XCTAssertEqual(file.text, "Keep these notes")
+        XCTAssertNil(store.lab.sessions[notebookID], "Adding content never runs code")
+    }
+
+    @MainActor
     func testSelectionStartsANotebookBesideThePageAndLaterPassagesAreAppended() async throws {
         let fixture = try WorkbenchFixture()
         defer { fixture.close() }
@@ -191,6 +273,29 @@ final class LabFlowTests: XCTestCase {
         XCTAssertEqual(store.lab.consoles[notebook]?.count, 0)
     }
 
+    @MainActor
+    func testClearingConsoleKeepsCommandsAlreadyQueuedForPython() async throws {
+        guard !(await LabRuntime().discover()).isEmpty else { throw XCTSkip("Needs Python 3") }
+        let fixture = try WorkbenchFixture()
+        defer { fixture.close(); fixture.store.lab.shutdownAll() }
+        let store = fixture.store
+        store.open(fixture.book)
+        let sessionID = try XCTUnwrap(store.consoleTarget)
+        // All three commands wait for the new kernel. Clearing the display must not cancel the first two.
+        store.runConsole("x = 21")
+        store.runConsole("x *= 2")
+        store.clearConsole()
+        XCTAssertTrue(store.lab.consoles[sessionID]?.isEmpty == true)
+        store.runConsole("x")
+        let deadline = Date.now.addingTimeInterval(30)
+        while store.lab.consoles[sessionID]?.last?.count == nil, Date.now < deadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertEqual(store.lab.consoles[sessionID]?.count, 1)
+        XCTAssertEqual(store.lab.consoles[sessionID]?.last?.outputs.map(\.text), ["42"])
+        XCTAssertEqual(store.lab.consoles[sessionID]?.last?.count, 3)
+    }
+
     /// Lemma calls shutdownAll as it quits: a kernel stuck in `while True: pass` must be gone when it returns.
     @MainActor
     func testQuittingStopsABusyKernelBeforeReturning() async throws {
@@ -274,6 +379,85 @@ final class LabFlowTests: XCTestCase {
     }
 
     /// Closing the tab of a book whose cell runs in the background keeps what the cell printed, with a note.
+    @MainActor
+    func testClosingOneBookTabKeepsPythonWhileAnotherWindowUsesTheBook() async throws {
+        guard !(await LabRuntime().discover()).isEmpty else { throw XCTSkip("Needs Python 3") }
+        let fixture = try WorkbenchFixture(), app = fixture.store.app
+        defer { app.prepareForTermination(); fixture.close() }
+        let first = app.claimWindow(nil)
+        first.open(fixture.book)
+        let bookID = try XCTUnwrap(first.workspace?.id)
+        let notebookID = try XCTUnwrap(first.newLab(title: "Shared Python"))
+        let cellID = try XCTUnwrap(first.lab(notebookID)?.cells.first?.id)
+        first.updateLab(notebookID) { $0.cells[0].source = "x = 21" }
+        first.runLabCell(notebookID, cellID: cellID)
+        let deadline = Date.now.addingTimeInterval(30)
+        while first.lab(notebookID)?.cells.first?.executionCount == nil, Date.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let session = try XCTUnwrap(first.lab.sessions[notebookID])
+        XCTAssertEqual(session.state, .idle)
+        let second = app.newWindow()
+        _ = app.claimWindow(second.windowID)
+        second.open(fixture.book)
+        second.openLabNotebook(notebookID)
+
+        first.closeTab(bookID)
+
+        XCTAssertTrue(second.lab.sessions[notebookID] === session, "Closing a duplicate book tab must keep the shared notebook's Python and variables")
+        second.runConsole("x * 2")
+        let answerDeadline = Date.now.addingTimeInterval(30)
+        while second.lab.consoles[notebookID]?.last?.count == nil, Date.now < answerDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(second.lab.consoles[notebookID]?.last?.outputs.map(\.text), ["42"])
+        second.closeTab(bookID)
+        XCTAssertNil(app.lab.sessions[notebookID], "The last open tab still releases Python")
+    }
+
+    @MainActor
+    func testPythonKeepsDeliveringAfterItsOriginalWindowCloses() async throws {
+        guard !(await LabRuntime().discover()).isEmpty else { throw XCTSkip("Needs Python 3") }
+        let fixture = try WorkbenchFixture(), app = fixture.store.app
+        defer { app.prepareForTermination(); fixture.close() }
+        var first: StudyStore? = app.newWindow()
+        _ = app.claimWindow(first!.windowID)
+        let window = NSWindow(contentRect: .init(x: 0, y: 0, width: 1000, height: 700), styleMask: .titled, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+        first!.mainWindow = window
+        first!.open(fixture.book)
+        let notebookID = try XCTUnwrap(first!.newLab(title: "Shared Python"))
+        let cellID = try XCTUnwrap(first!.lab(notebookID)?.cells.first?.id)
+        first!.updateLab(notebookID) { $0.cells[0].source = "x = 21" }
+        first!.runLabCell(notebookID, cellID: cellID)
+        let deadline = Date.now.addingTimeInterval(30)
+        while first!.lab(notebookID)?.cells.first?.executionCount == nil, Date.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        let session = try XCTUnwrap(app.lab.sessions[notebookID])
+        XCTAssertEqual(session.state, .idle)
+        let second = app.newWindow()
+        _ = app.claimWindow(second.windowID)
+        second.open(fixture.book)
+        second.openLabNotebook(notebookID)
+        weak var original = first
+        app.windowWillClose(window)
+        first = nil
+        let releaseDeadline = Date.now.addingTimeInterval(3)
+        while original != nil, Date.now < releaseDeadline { try await Task.sleep(for: .milliseconds(50)) }
+        XCTAssertNil(original, "The closed workbench must not be retained by Python")
+
+        second.runConsole("x * 2")
+        let answerDeadline = Date.now.addingTimeInterval(5)
+        while app.lab.consoles[notebookID]?.last?.count == nil, Date.now < answerDeadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(app.lab.sessions[notebookID] === session, "The surviving window keeps the same Python and its variables")
+        XCTAssertEqual(app.lab.consoles[notebookID]?.last?.outputs.map(\.text), ["42"])
+        XCTAssertEqual(session.state, .idle, "The kernel's completion must still reach the surviving window")
+    }
+
     @MainActor
     func testClosingABookMidRunKeepsTheOutputSoFar() async throws {
         guard !(await LabRuntime().discover()).isEmpty else { throw XCTSkip("Needs Python 3") }
