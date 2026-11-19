@@ -18,7 +18,8 @@ struct KindBadge: View {
 
     static func letter(for key: ReferenceKey) -> String {
         switch key.kind {
-        case .equation: "E"; case .figure: "F"; case .table: "T"; case .section, .chapter: "§"; case .exercise: "X"
+        case .equation: "E"; case .figure: "F"; case .chart: "C"; case .table: "T"; case .box: "B"
+        case .section, .chapter, .specialFeature: "§"; case .exercise: "X"
         case .algorithm: "A"; case .citation: "R"; case .link: "L"
         case .theorem:
             switch key.name ?? "" {
@@ -33,9 +34,9 @@ struct KindBadge: View {
     static func color(for key: ReferenceKey) -> Color {
         switch key.kind {
         case .equation: Color(nsColor: .systemTeal)
-        case .figure: Color(nsColor: .systemOrange)
-        case .table: Color(nsColor: .systemBrown)
-        case .section, .chapter: Color(nsColor: .systemGray)
+        case .figure, .chart: Color(nsColor: .systemOrange)
+        case .table, .box: Color(nsColor: .systemBrown)
+        case .section, .chapter, .specialFeature: Color(nsColor: .systemGray)
         case .exercise: Color(nsColor: .systemIndigo)
         case .algorithm: Color(nsColor: .systemGreen)
         case .citation, .link: Color(nsColor: .systemGray)

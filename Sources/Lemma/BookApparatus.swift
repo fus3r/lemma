@@ -129,7 +129,7 @@ extension StudyStore {
     }
 }
 
-/// Equations, figures, tables, algorithms, exercises and statements by chapter, from the whole-book analysis.
+/// Numbered objects by chapter, from the whole-book analysis.
 struct SymbolsSidebar: View {
     @Bindable var store: StudyStore
     @State private var filter = ""
@@ -137,7 +137,7 @@ struct SymbolsSidebar: View {
     @State private var expanded: Set<String> = []
     @State private var captions: [ReferenceKey: String] = [:]
 
-    private static let kinds: [ReferenceKind] = [.equation, .figure, .table, .algorithm, .exercise, .theorem]
+    private static let kinds: [ReferenceKind] = [.equation, .figure, .chart, .table, .box, .algorithm, .exercise, .theorem, .specialFeature]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -153,14 +153,19 @@ struct SymbolsSidebar: View {
     private var kindPicker: some View {
         HStack(spacing: 4) {
             chip("All", selected: kind == nil) { kind = nil }
-            ForEach(Self.kinds, id: \.self) { item in
-                chip(short(item), selected: kind == item) { kind = kind == item ? nil : item }.help(item.label + "s")
+            ForEach(Self.kinds.filter { store.analysis?.definitionCounts[$0] != nil || $0 == kind }, id: \.self) { item in
+                chip(short(item), selected: kind == item) { kind = kind == item ? nil : item }
+                    .help(item == .box ? "Boxes" : item.label + "s")
             }
         }
     }
 
     private func short(_ kind: ReferenceKind) -> String {
-        switch kind { case .equation: "Eq"; case .figure: "Fig"; case .table: "Tab"; case .algorithm: "Alg"; case .exercise: "Ex"; case .theorem: "Thm"; default: kind.label }
+        switch kind {
+        case .equation: "Eq"; case .figure: "Fig"; case .table: "Tab"; case .algorithm: "Alg"; case .exercise: "Ex"; case .theorem: "Thm"
+        case .specialFeature: "Feature"
+        default: kind.label
+        }
     }
 
     private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
@@ -179,7 +184,7 @@ struct SymbolsSidebar: View {
             let groups = chapterGroups(analysis)
             if groups.isEmpty {
                 PaneEmptyState(symbol: "function", title: filter.isEmpty ? "No numbered objects" : "No matches",
-                               message: filter.isEmpty ? "Lemma recognises labels such as “(2.3)”, “FIGURE 2.1”, “Algorithm 3.1” or “Ex. 2.8”. This document may number them differently." : "Try a number such as 3.4, or a kind such as figure.")
+                               message: filter.isEmpty ? "Lemma recognises labels such as “(2.3)”, “Figure 2.1”, “Chart A.1” or “Ex. 2.8”. This document may number them differently." : "Try a number such as 3.4, or a kind such as chart.")
             } else {
                 if kind == .exercise { exerciseSummary(groups.flatMap(\.targets)).padding(.horizontal, 12).padding(.vertical, 6); Divider() }
                 List {

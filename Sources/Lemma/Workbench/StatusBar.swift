@@ -89,6 +89,7 @@ private struct AnalysisStatusItem: View {
         var parts: [String] = []
         if let equations = model.definitionCounts[.equation], equations > 0 { parts.append("\(equations) eq.") }
         if let figures = model.definitionCounts[.figure], figures > 0 { parts.append("\(figures) fig.") }
+        if let charts = model.definitionCounts[.chart], charts > 0 { parts.append("\(charts) charts") }
         let statements = analysis.structure.statements.count
         if statements > 0 { parts.append("\(statements) results") }
         if !analysis.bibliography.isEmpty { parts.append("\(analysis.bibliography.count) refs") }

@@ -4,6 +4,12 @@ The detailed notes written for each version before 3.0 are in [docs/HISTORY.md](
 
 ## Unreleased
 
+## 3.6.1 (November 2026)
+
+- Follow references to charts, numbered boxes and lettered special features in report PDFs. Go To and Find All References support these labels.
+- Repeated labels such as “Chart A” resolve within their own box. Chart previews include the plotted panels and their captions.
+- Hover previews work for embedded PDF links after analysis. Linked footnote previews keep the full note in view.
+
 ## 3.6.0 (November 2026)
 
 - Annotate PDFs with the shared toolbox: pen, boxes, ellipses, lines, arrows and eraser; custom colors, widths, dashed outlines and translucent fills; move and resize shapes, Undo/Redo, and export a separate annotated PDF. Saved notes open in Preview, with Edit explicit.

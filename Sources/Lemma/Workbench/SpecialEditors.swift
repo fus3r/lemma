@@ -244,6 +244,10 @@ struct ReleaseNotesEditor: View {
     @Environment(\.theme) private var theme
 
     private let sections: [(String, String, [String])] = [
+        ("Lemma 3.6.1 — references in reports", "references", [
+            "Follow references to charts, boxes and special features. Repeated chart labels resolve within their own box.",
+            "Chart previews include the plotted panels. Embedded PDF links open hover previews, and linked footnotes show the full note."
+        ]),
         ("Lemma 3.6: annotations and reliable shared work", "edit", [
             "Annotate PDFs with pen, boxes, ellipses, lines, arrows and eraser. Move or resize shapes, choose color, width, dash and fill, undo your edits, and export a separate annotated PDF.",
             "Highlights fit individual lines, including mathematics. The compact palette has named colors, a shortcut for each color, and separate highlight and underline defaults.",

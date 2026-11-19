@@ -116,6 +116,7 @@ public enum PageReferenceAnalyzer {
 
     /// What a page analysis may use beyond the text layer.
     public struct DefinitionOptions: Sendable {
+        var imageBounds: [CGRect]?
         /// Bold and italic runs read from the page's fonts (`EmphasisExtractor`): captions, statement heads and
         /// headings are usually set in bold, which tells them apart from a sentence that starts with “Figure 2.1”.
         public var emphasis: [EmphasisRun]?
@@ -141,7 +142,7 @@ public enum PageReferenceAnalyzer {
     private static let leadingNumber = try! NSRegularExpression(pattern: #"^(\d{1,2}\.\d{1,3})\s+(?=\S)"#, options: [.anchorsMatchLines])
     /// “Exercises 64” (a contents line or running head), “Figures 2.1 and 2.2”: a plural head names several items and defines none.
     private static let pluralHead = try! NSRegularExpression(
-        pattern: #"^(?i:figures|tables|exercises|problems|algorithms|theorems|lemmas|lemmata|definitions|propositions|corollaries|examples|remarks|facts|properties|axioms|hypotheses|claims|conjectures|assumptions|observations|notations)\b"#)
+        pattern: #"^(?i:figures|charts|tables|exercises|problems|algorithms|theorems|lemmas|lemmata|definitions|propositions|corollaries|examples|remarks|facts|properties|axioms|hypotheses|claims|conjectures|assumptions|observations|notations)\b"#)
     static func isPluralHead(_ text: String) -> Bool {
         pluralHead.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
     }
@@ -314,6 +315,13 @@ public enum PageReferenceAnalyzer {
             if let cachedFragments { return cachedFragments }
             let value = Self.fragments(on: page); cachedFragments = value; return value
         }
+        var cachedImages = options.imageBounds
+        func imageBounds() -> [CGRect] {
+            if let cachedImages { return cachedImages }
+            let value = page.pageRef.map { EmphasisContentScanner.scan($0).imageBounds } ?? []
+            cachedImages = value
+            return value
+        }
         func character(_ index: Int) -> Character? {
             guard index >= 0, index < string.length else { return nil }
             return Character(string.substring(with: string.rangeOfComposedCharacterSequence(at: index)))
@@ -359,7 +367,8 @@ public enum PageReferenceAnalyzer {
         func inMargin(_ rect: CGRect) -> Bool { rect.minY >= box.maxY - 40 || rect.maxY <= box.minY + 40 }
 
         // Equation labels: “(2.3)” and, as candidates, undotted “(12)”.
-        var labels = ReferenceScanner.mentions(in: text).filter { $0.key.kind == .equation && $0.text.hasPrefix("(") }
+        let mentions = ReferenceScanner.mentions(in: text)
+        var labels = mentions.filter { $0.key.kind == .equation && $0.text.hasPrefix("(") }
         let taken = labels.map(\.range)
         for match in plainLabel.matches(in: text, range: NSRange(location: 0, length: string.length))
         where !taken.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
@@ -374,9 +383,17 @@ public enum PageReferenceAnalyzer {
             }
         }
 
-        for mention in ReferenceScanner.mentions(in: text) {
+        for mention in mentions {
             let key = mention.key
             switch key.kind {
+            case .chart:
+                guard mention.hasHead, !Self.isPluralHead(mention.text), let label = rect(mention.range), !inMargin(label),
+                      startsLine(mention.range.location, label: label) else { continue }
+                let endsLabel = next(after: mention.range.upperBound).map { $0.isNewline || ":–—".contains($0) } ?? true
+                guard endsLabel && (isBold(mention.range) ||
+                    (mention.text.first?.isUppercase == true && ReferenceLayout.isSeparatedAbove(label, fragments: fragments(), page: box))) else { continue }
+                add(key, anchor: label, region: ReferenceLayout.chartRegion(caption: label, fragments: fragments(), images: imageBounds(), page: box),
+                    at: mention.range.location)
             case .figure, .table, .algorithm, .exercise, .theorem:
                 guard mention.hasHead, !Self.isPluralHead(mention.text), let label = rect(mention.range), !inMargin(label),
                       startsLine(mention.range.location, label: label) else { continue }
@@ -531,17 +548,39 @@ public enum PageReferenceAnalyzer {
     public static func target(for destination: LinkDestination, key: ReferenceKey, in document: PDFDocument, origin: ReferenceTarget.Origin) -> ReferenceTarget? {
         guard let page = document.page(at: destination.pageIndex) else { return nil }
         let defined = definitions(on: page, pageIndex: destination.pageIndex)
-        if let match = defined.first(where: { $0.key == key }) ?? (key.kind == .link ? definition(numbered: key.number, at: destination.point, in: defined) : nil) {
-            var target = match; target.origin = origin; return target
+        var pageKey = key
+        if key.kind == .chart { pageKey.name = nil }
+        if var target = defined.first(where: { $0.key == pageKey }) {
+            target.key = key; target.origin = origin; return target
+        }
+        if key.kind == .link, var target = definition(numbered: key.number, at: destination.point, in: defined) {
+            target.origin = origin; return target
         }
         let box = page.bounds(for: .cropBox)
-        let point = destination.point ?? CGPoint(x: box.minX, y: box.maxY)
-        let column = ReferenceLayout.column(containing: min(max(point.x, box.minX), box.maxX), near: point.y, fragments: fragments(on: page), page: box)
+        var point = destination.point ?? CGPoint(x: box.minX, y: box.maxY)
+        let lines = fragments(on: page)
+        if key.kind == .link, let note = ReferenceLayout.footnoteRegion(linkText: key.number, at: point, fragments: lines, page: box) {
+            return ReferenceTarget(key: key, pageIndex: destination.pageIndex, anchor: PageRegion(note.anchor),
+                                   region: PageRegion(note.region), origin: origin)
+        }
+        // Box bookmarks can sit above the heading and to the left of the body column.
+        let label = key.kind == .box ? boxLabel(key, near: point, on: page) : nil
+        if let label { point = CGPoint(x: label.minX, y: label.maxY) }
+        let x = min(max(point.x, box.minX), box.maxX)
+        let column = ReferenceLayout.column(containing: x, near: point.y, fragments: lines, page: box)
+        let left = key.kind == .box || key.kind == .specialFeature ? min(x, column.lowerBound) : column.lowerBound
         let top = min(point.y + 6, box.maxY)
         let height = min(170, max(24, top - box.minY))
-        let region = CGRect(x: column.lowerBound - 4, y: top - height, width: column.upperBound - column.lowerBound + 8, height: height).intersection(box)
-        let anchor = CGRect(x: column.lowerBound, y: top - 14, width: column.upperBound - column.lowerBound, height: 14).intersection(box)
+        let region = CGRect(x: left - 4, y: top - height, width: column.upperBound - left + 8, height: height).intersection(box)
+        let anchor = label ?? CGRect(x: left, y: top - 14, width: column.upperBound - left, height: 14).intersection(box)
         return ReferenceTarget(key: key, pageIndex: destination.pageIndex, anchor: PageRegion(anchor), region: PageRegion(region), origin: origin)
+    }
+
+    private static func boxLabel(_ key: ReferenceKey, near point: CGPoint, on page: PDFPage) -> CGRect? {
+        guard let text = page.string else { return nil }
+        return ReferenceScanner.mentions(in: text).lazy.filter { $0.key == key }.compactMap {
+            page.selection(for: $0.range)?.bounds(for: page)
+        }.first { abs($0.minX - point.x) <= 16 && abs($0.maxY - point.y) <= 32 && !$0.isEmpty && LayoutFragment.isSane($0) }
     }
 
     private static func specified(_ point: CGPoint) -> CGPoint? {
@@ -552,6 +591,28 @@ public enum PageReferenceAnalyzer {
 }
 
 extension ReferenceLayout {
+    /// A PDF link to a numbered footnote can land in a different column from the main text. Confirm the number
+    /// at the destination, then include its indented continuation lines up to the next note.
+    static func footnoteRegion(linkText: String, at point: CGPoint, fragments: [LayoutFragment], page: CGRect) -> (anchor: CGRect, region: CGRect)? {
+        guard linkText.count <= 6, point.y <= page.minY + page.height / 3 else { return nil }
+        let number = String(linkText.reversed().prefix(while: \.isNumber).reversed())
+        guard !number.isEmpty, let label = fragments.first(where: {
+            $0.text.trimmingCharacters(in: .whitespacesAndNewlines) == number &&
+            abs($0.bounds.minX - point.x) <= 10 && abs($0.bounds.maxY - point.y) <= 8
+        })?.bounds else { return nil }
+        let below = fragments.filter {
+            $0.bounds.minX >= label.minX - 2 && $0.bounds.maxY <= label.maxY + 3 && $0.bounds.minY > page.minY + 36
+        }
+        let lines = rows(below, in: page.minX...page.maxX)
+        guard let first = lines.firstIndex(where: { $0.minY <= label.midY && $0.maxY >= label.midY }) else { return nil }
+        var last = first
+        while last + 1 < lines.count, lines[last + 1].minX > label.minX + 2,
+              lines[last].minY - lines[last + 1].maxY <= 6 { last += 1 }
+        let right = lines[first...last].map(\.maxX).max() ?? label.maxX
+        let region = CGRect(x: label.minX, y: lines[last].minY, width: right - label.minX, height: lines[first].maxY - lines[last].minY)
+        return (label, padded(region, page: page))
+    }
+
     /// Whether the line at `rect` starts a new block: nothing above, a visible gap, or non-body content above.
     public static func isSeparatedAbove(_ rect: CGRect, fragments: [LayoutFragment], page: CGRect) -> Bool {
         let column = column(containing: rect.midX, near: rect.midY, fragments: fragments, page: page, margins: true)
@@ -564,7 +625,7 @@ extension ReferenceLayout {
 
 /// Persisted reference scanning, so a book is analysed once. Bump `currentVersion` when heuristics change.
 public struct ReferenceCache: Codable, Sendable {
-    public static let currentVersion = 3
+    public static let currentVersion = 4
     public var version = ReferenceCache.currentVersion
     public var scannedPages: Set<Int> = []
     public var targets: [ReferenceTarget] = []

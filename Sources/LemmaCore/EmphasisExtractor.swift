@@ -222,6 +222,7 @@ struct EmphasisScanResult {
     var bodyFontSize: CGFloat = 0  // dominant size of running text, 0 if unknown
     var sizeVotes: [Int: Int] = [:]  // em×10 -> letters on prose-like lines
     var glyphCount = 0
+    var imageBounds: [CGRect] = []
     var usedFormRecursion = false
 }
 
@@ -346,6 +347,7 @@ final class EmphasisScanContext {
     private(set) var topLevelGlyphs = 0
     private(set) var formInvocations = 0
     private var glyphCount = 0
+    private var imageBounds: [CGRect] = []
 
     init(recurseIntoForms: Bool) {
         self.recurseIntoForms = recurseIntoForms
@@ -377,7 +379,7 @@ final class EmphasisScanContext {
         if let best = votes.max(by: { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) }) {
             body = CGFloat(best.key) / 10
         }
-        return EmphasisScanResult(runs: builder.runs, bodyFontSize: body, sizeVotes: votes, glyphCount: glyphCount)
+        return EmphasisScanResult(runs: builder.runs, bodyFontSize: body, sizeVotes: votes, glyphCount: glyphCount, imageBounds: imageBounds)
     }
 
     // MARK: Operator table
@@ -530,9 +532,13 @@ final class EmphasisScanContext {
         var stream: CGPDFStreamRef?
         guard CGPDFObjectGetValue(object, .stream, &stream), let stream,
               let dict = CGPDFStreamGetDictionary(stream) else { return }
-        var subtype: UnsafePointer<Int8>?
-        guard CGPDFDictionaryGetName(dict, "Subtype", &subtype), let subtype,
-              String(cString: subtype) == "Form" else { return }
+        let subtype = EmphasisPDF.name(dict, "Subtype")
+        if subtype == "Image" {
+            let bounds = CGRect(x: 0, y: 0, width: 1, height: 1).applying(state.ctm)
+            if !bounds.isEmpty, LayoutFragment.isSane(bounds) { imageBounds.append(bounds) }
+            return
+        }
+        guard subtype == "Form" else { return }
         formInvocations += 1
         guard recurseIntoForms, formDepth < 8, let table else { return }
         stack.append(state)

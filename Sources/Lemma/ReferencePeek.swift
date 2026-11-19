@@ -260,12 +260,13 @@ extension RegionPDFView {
         switch kind {
         case .citation: "book"
         case .equation: "symbol-numeric"
-        case .figure: "file-media"
+        case .figure, .chart: "file-media"
         case .table: "table"
+        case .box: "symbol-structure"
         case .algorithm: "symbol-method"
         case .exercise: "tasklist"
         case .theorem: "verified"
-        case .section, .chapter: "symbol-class"
+        case .section, .chapter, .specialFeature: "symbol-class"
         case .link: "link"
         }
     }

@@ -38,7 +38,7 @@ public struct CitationRecord: Codable, Equatable, Sendable {
 /// defined and cited, the back-of-book index and the reference list. Stored per document beside its search index.
 public struct BookAnalysis: Codable, Sendable {
     /// Bump when the analysis changes, so books are read again.
-    public static let currentVersion = 7
+    public static let currentVersion = 8
     public var version = BookAnalysis.currentVersion
     public var pageCount: Int
     public var numbering: PageNumbering?
@@ -123,7 +123,7 @@ public struct KeyResolver: Sendable {
     public func resolve(_ key: ReferenceKey) -> ReferenceKey? {
         if defined.contains(key) { return key }
         // “Figure 1.15a” names a panel of Figure 1.15.
-        if [.figure, .table].contains(key.kind), let last = key.number.last, last.isLetter {
+        if [.figure, .chart, .table].contains(key.kind), let last = key.number.last, last.isLetter {
             let whole = ReferenceKey(kind: key.kind, number: String(key.number.dropLast()), name: key.name)
             if defined.contains(whole) { return whole }
         }
@@ -155,6 +155,7 @@ public enum BookAnalyzer {
                                isCancelled: @Sendable () -> Bool = { false }) -> BookAnalysis? {
         let count = document.pageCount
         var analysis = BookAnalysis(pageCount: count)
+        let report = ReportReferences(outline: outline)
         // Numbered outline entries are authoritative for sections; numbered lines in the text are then not headings.
         let outlineSections = Set(outline.compactMap { OutlineMap.numberPrefix(of: $0.title) })
         let textHeadings = outlineSections.filter { $0.contains(".") }.count < 3
@@ -187,10 +188,16 @@ public enum BookAnalyzer {
             let lines = PageReferenceAnalyzer.fragments(on: page)
             pageLines.append(lines.map { PageLine(pageIndex: pageIndex, text: $0.text, bounds: $0.bounds) })
             candidates += runningHeadCandidates(lines, pageIndex: pageIndex, box: box)
-            let runs = text.isEmpty ? [] : EmphasisExtractor.runs(on: page, pageText: text, bodyFontSize: bodySize)
-            let options = PageReferenceAnalyzer.DefinitionOptions(emphasis: runs, textHeadings: textHeadings,
+            let emphasis = text.isEmpty ? EmphasisAnalysis() : EmphasisExtractor.analyze(page: page, pageText: text, bodyFontSize: bodySize)
+            let runs = emphasis.located.map(\.run)
+            var options = PageReferenceAnalyzer.DefinitionOptions(emphasis: runs, textHeadings: textHeadings,
                                                                   knownSections: outlineSections, numberedResults: true)
-            var definitions = PageReferenceAnalyzer.definitions(on: page, pageIndex: pageIndex, options: options)
+            options.imageBounds = emphasis.scan.imageBounds
+            var definitions = PageReferenceAnalyzer.definitions(on: page, pageIndex: pageIndex, options: options).map { target in
+                var target = target
+                target.key = report.key(for: target.key, onPage: pageIndex, y: target.anchor.rect.midY)
+                return target
+            }
             let defined = Set(definitions.map(\.key))
             let listed = PageReferenceAnalyzer.numberedExercises(on: page, pageIndex: pageIndex, sequence: &exerciseSequence,
                                                                  sections: outlineSectionPages, emphasis: runs)
@@ -290,6 +297,10 @@ public enum BookAnalyzer {
                                                             in: document, origin: .outline) else { continue }
             definitions.append(target); definedKeys.insert(key)
         }
+        for heading in report.headings where !definedKeys.contains(heading.key) {
+            guard let target = heading.target(in: document) else { continue }
+            definitions.append(target); definedKeys.insert(heading.key)
+        }
         analysis.definitions = definitions
 
         // Mentions, now that every label is known: undotted equation numbers become references in papers that use them.
@@ -300,9 +311,14 @@ public enum BookAnalyzer {
             if isCancelled() { return nil }
             guard let page = document.page(at: pageIndex) else { continue }
             let pageDefinitions = definitions.filter { $0.pageIndex == pageIndex }
-            analysis.mentions += mentions(in: text, page: page, pageIndex: pageIndex, definitions: pageDefinitions, plainEquations: plain)
+            analysis.mentions += mentions(in: text, page: page, pageIndex: pageIndex, definitions: pageDefinitions, plainEquations: plain, report: report)
                 .filter { !isBackMatter(pageIndex, $0.location) }
-                .map { record in var record = record; record.key = resolver.resolve(record.key) ?? record.key; return record }
+                .compactMap { record in
+                    var record = record
+                    if let key = resolver.resolve(record.key) { record.key = key }
+                    else if [.chart, .box, .specialFeature].contains(record.key.kind) { return nil }
+                    return record
+                }
         }
 
         // Statements, proofs and what each one uses.
@@ -489,19 +505,21 @@ public enum BookAnalyzer {
     }
 
     /// Text mentions of numbered objects, excluding defining labels and running heads.
-    static func mentions(in text: String, page: PDFPage, pageIndex: Int, definitions: [ReferenceTarget], plainEquations: Set<String> = []) -> [MentionRecord] {
+    static func mentions(in text: String, page: PDFPage, pageIndex: Int, definitions: [ReferenceTarget], plainEquations: Set<String>,
+                         report: ReportReferences) -> [MentionRecord] {
         let string = text as NSString
         let box = page.bounds(for: .cropBox)
         var records: [MentionRecord] = []
         for mention in ReferenceScanner.mentions(in: text, plainEquations: plainEquations) {
-            let defining = definitions.filter { $0.key == mention.key }
-            if !defining.isEmpty || mention.key.kind == .section {
+            var key = mention.key
+            if key.kind == .chart || key.kind == .section || definitions.contains(where: { $0.key == key }) {
                 guard let rect = page.selection(for: mention.range)?.bounds(for: page), !rect.isNull else { continue }
-                if defining.contains(where: { $0.anchor.rect.insetBy(dx: -1, dy: -1).intersects(rect) }) { continue }
+                key = report.key(for: key, onPage: pageIndex, y: rect.midY)
+                if definitions.contains(where: { $0.key == key && $0.anchor.rect.insetBy(dx: -1, dy: -1).intersects(rect) }) { continue }
                 if rect.minY >= box.maxY - 36 || rect.maxY <= box.minY + 36 { continue }
             }
             let context = Self.contextAround(mention.range, in: string)
-            records.append(MentionRecord(key: mention.key, pageIndex: pageIndex, location: mention.range.location, length: mention.range.length,
+            records.append(MentionRecord(key: key, pageIndex: pageIndex, location: mention.range.location, length: mention.range.length,
                                          before: context.before, match: mention.text.replacingOccurrences(of: "\n", with: " "), after: context.after))
         }
         return records

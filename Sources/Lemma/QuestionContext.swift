@@ -95,7 +95,8 @@ extension StudyStore {
         guard let index = references else { return candidates }
         var seen = Set<ReferenceKey>()
         for mention in ReferenceScanner.mentions(in: quote) where seen.insert(mention.key).inserted {
-            guard let target = await index.resolve(mention.key, from: pageIndex), self.workspace?.id == workspaceID else { continue }
+            guard let target = await index.resolve(mention.key, from: pageIndex, y: region.rect.midY),
+                  self.workspace?.id == workspaceID else { continue }
             // A selected equation contains its own label; that is the source, not a citation.
             if target.pageIndex == pageIndex, target.region.rect.intersects(region.rect) { continue }
             guard let page = document.page(at: target.pageIndex), let png = try? PDFRegionRenderer.png(page: page, region: target.region) else { continue }

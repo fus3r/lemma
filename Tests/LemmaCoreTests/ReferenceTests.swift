@@ -1,7 +1,7 @@
 import XCTest
 import AppKit
 import PDFKit
-import LemmaCore
+@testable import LemmaCore
 
 final class ReferenceTests: XCTestCase {
     func testScannerRecognizesBookAndPaperNumbering() {
@@ -30,6 +30,79 @@ final class ReferenceTests: XCTestCase {
     func testHeadingsAreShortNumberedLines() {
         let text = "2.3.3 From Least Squares to Nearest Neighbors\n2.5 times larger than before, which continues\n3.1 Introduction\n"
         XCTAssertEqual(ReferenceScanner.headings(in: text).map(\.key.number), ["2.3.3", "3.1"])
+    }
+
+    @MainActor
+    func testReportChartsAndBookmarkedReferences() throws {
+        let document = try reportDocument()
+        let outline = [
+            OutlineItem(title: "Overview", pageIndex: 0, level: 0),
+            OutlineItem(title: "Box 1 First group of charts", pageIndex: 1, level: 0, point: CGPoint(x: 72, y: 728)),
+            OutlineItem(title: "Box 2 Second group of charts", pageIndex: 2, level: 0, point: CGPoint(x: 72, y: 728)),
+            OutlineItem(title: "Conclusions", pageIndex: 2, level: 0, point: CGPoint(x: 72, y: 342)),
+            OutlineItem(title: "Special features", pageIndex: 3, level: 0),
+            OutlineItem(title: "A An appendix with charts", pageIndex: 3, level: 1, point: CGPoint(x: 72, y: 728))
+        ]
+        let analysis = try XCTUnwrap(BookAnalyzer.analyze(document: document, outline: outline))
+        let targets = analysis.definitionsByKey()
+        let first = ReferenceKey(kind: .chart, number: "A", name: "Box 1")
+        let second = ReferenceKey(kind: .chart, number: "A", name: "Box 2")
+        XCTAssertEqual(targets[first]?.pageIndex, 1)
+        XCTAssertEqual(targets[second]?.pageIndex, 2)
+        XCTAssertEqual(analysis.mentions.filter { $0.key == first }.map(\.pageIndex), [1])
+        XCTAssertEqual(analysis.mentions.filter { $0.key == second }.map(\.pageIndex), [2])
+        XCTAssertNil(targets[ReferenceKey(kind: .chart, number: "99")], "Running text that begins with a chart mention is not a caption.")
+
+        let chart = try XCTUnwrap(targets[ReferenceKey(kind: .chart, number: "1")])
+        XCTAssertTrue(chart.region.rect.contains(CGRect(x: 90, y: 430, width: 390, height: 125)))
+        XCTAssertGreaterThan(chart.region.y, 365, "The body paragraph below the chart is outside the preview.")
+        for (kind, number, page) in [(ReferenceKind.chart, "A.1", 3), (.box, "2", 2), (.specialFeature, "A", 3)] {
+            let key = ReferenceKey(kind: kind, number: number)
+            XCTAssertEqual(targets[key]?.pageIndex, page)
+            XCTAssertTrue(analysis.mentions.contains { $0.key == key && $0.pageIndex == 0 })
+        }
+    }
+
+    @MainActor
+    private func reportDocument() throws -> PDFDocument {
+        let bytes = NSMutableData()
+        var box = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let context = try XCTUnwrap(CGContext(consumer: try XCTUnwrap(CGDataConsumer(data: bytes)), mediaBox: &box, nil))
+        let bitmap = try XCTUnwrap(CGContext(data: nil, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 0,
+                                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+        bitmap.setFillColor(NSColor.gray.cgColor)
+        bitmap.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+        let artwork = try XCTUnwrap(bitmap.makeImage())
+        for (heading, mention, chart) in [
+            ("Overview", "See Chart 1, Chart A.1, Box 2 and Special Feature A for more details.", "Chart 1"),
+            ("Box 1", "The two indicators are shown together in Chart A, panel a.", "Chart A"),
+            ("Box 2", "The next set of indicators is shown in Chart A, panel b.", "Chart A"),
+            ("A An appendix with charts", "See Chart A.1 for the final results.", "Chart A.1")
+        ] {
+            context.beginPDFPage(nil)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+            func draw(_ text: String, at y: CGFloat, size: CGFloat = 12) {
+                (text as NSString).draw(at: CGPoint(x: 72, y: y), withAttributes: [.font: NSFont.systemFont(ofSize: size)])
+            }
+            draw(heading, at: 710, size: 14)
+            draw(mention, at: 665)
+            draw(chart, at: 620)
+            draw("Results from two independent surveys and a comparison with the baseline", at: 598)
+            draw("Survey estimates, percentages", at: 580, size: 9)
+            context.draw(artwork, in: CGRect(x: 90, y: 430, width: 390, height: 125))
+            draw("Sources: two independent surveys and the survey methodology.", at: 412, size: 8)
+            draw("The analysis continues with results for the full population and its subgroups.", at: 365)
+            if heading == "Box 2" {
+                draw("Conclusions", at: 320, size: 14)
+                draw("Chart A, panel a, is outside the box here.", at: 285)
+                draw("Chart 99, as referenced in an earlier edition, is unavailable.", at: 269)
+            }
+            NSGraphicsContext.restoreGraphicsState()
+            context.endPDFPage()
+        }
+        context.closePDF()
+        return try XCTUnwrap(PDFDocument(data: bytes as Data))
     }
 
     func testEquationRegionCoversTheDisplayAndStopsAtBodyText() {
@@ -157,6 +230,22 @@ final class ReferenceTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(region.minX, 313)
         XCTAssertEqual(region.minY, 640 - 1.5, accuracy: 0.01)
         XCTAssertEqual(region.maxY, 650 + 1.5, accuracy: 0.01)
+    }
+
+    func testLinkedFootnoteUsesItsOwnColumn() throws {
+        let fragments = [
+            fragment("The main text of a wide inset box", 56, 161, 419, 11),
+            fragment("11", 181, 140, 6, 9),
+            fragment("The first line of the linked footnote", 195, 140, 335, 9),
+            fragment("The continuation of the linked footnote", 195, 131, 340, 9),
+            fragment("12", 181, 118, 6, 9),
+            fragment("A different footnote on the same page", 195, 118, 320, 9)
+        ]
+        let note = try XCTUnwrap(ReferenceLayout.footnoteRegion(linkText: ".11", at: CGPoint(x: 179, y: 149), fragments: fragments,
+                                                               page: CGRect(x: 0, y: 0, width: 595, height: 842)))
+        XCTAssertEqual(note.anchor, fragments[1].bounds)
+        XCTAssertTrue(note.region.contains(fragments[3].bounds))
+        XCTAssertFalse(note.region.intersects(fragments[5].bounds))
     }
 
     func testOutlineChaptersSectionsAndCurrentPosition() {

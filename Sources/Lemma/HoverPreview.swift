@@ -66,6 +66,12 @@ final class HoverPreviewController {
     private func show(_ hit: (mention: PageMention, pageIndex: Int)) {
         guard canShow(hit), let store, let index = store.references else { return }
         let key = hit.mention.key
+        if hit.mention.destination != nil {
+            if let target = index.linkedTarget(for: hit.mention) {
+                present(hit, content: HoverPreviewContent(store: store, key: key, target: target))
+            }
+            return
+        }
         if let target = index.knownTarget(key) { present(hit, content: HoverPreviewContent(store: store, key: key, target: target)); return }
         guard key.kind != .citation else { return }
         // Without the whole-book analysis the definition is looked for page by page, nearest first. Not while the

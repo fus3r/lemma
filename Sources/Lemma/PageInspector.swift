@@ -305,7 +305,8 @@ struct PageInspector: View {
     }
 
     private func caption(_ target: ReferenceTarget) -> String? {
-        guard [.figure, .table, .algorithm].contains(target.key.kind), let page = store.document?.page(at: target.pageIndex) else { return nil }
+        guard [.figure, .chart, .table, .box, .specialFeature, .algorithm].contains(target.key.kind),
+              let page = store.document?.page(at: target.pageIndex) else { return nil }
         let text = page.selection(for: target.anchor.rect.insetBy(dx: -1, dy: -1).union(CGRect(x: target.anchor.x, y: target.anchor.y - 20, width: 400, height: 20)))?.string ?? ""
         let cleaned = TextRepair.repaired(text).split(whereSeparator: \.isWhitespace).joined(separator: " ")
         return cleaned.isEmpty ? nil : String(cleaned.prefix(90))

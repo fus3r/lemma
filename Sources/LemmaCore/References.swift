@@ -3,27 +3,28 @@ import PDFKit
 
 /// A numbered object that a book or paper refers to in its own text.
 public enum ReferenceKind: String, Codable, CaseIterable, Sendable {
-    case equation, figure, table, section, chapter, exercise, algorithm, theorem, link, citation
+    case equation, figure, chart, table, box, section, chapter, specialFeature, exercise, algorithm, theorem, link, citation
 
     public var label: String {
         switch self {
-        case .equation: "Equation"; case .figure: "Figure"; case .table: "Table"; case .section: "Section"
-        case .chapter: "Chapter"; case .exercise: "Exercise"; case .algorithm: "Algorithm"; case .theorem: "Statement"
+        case .equation: "Equation"; case .figure: "Figure"; case .chart: "Chart"; case .table: "Table"; case .box: "Box"
+        case .section: "Section"; case .chapter: "Chapter"; case .specialFeature: "Special Feature"
+        case .exercise: "Exercise"; case .algorithm: "Algorithm"; case .theorem: "Statement"
         case .link: "Link"; case .citation: "Citation"
         }
     }
 
     public var symbol: String {
         switch self {
-        case .equation: "function"; case .figure: "chart.xyaxis.line"; case .table: "tablecells"
-        case .section: "list.bullet.indent"; case .chapter: "book"; case .exercise: "pencil.and.list.clipboard"
+        case .equation: "function"; case .figure, .chart: "chart.xyaxis.line"; case .table: "tablecells"; case .box: "text.rectangle"
+        case .section, .specialFeature: "list.bullet.indent"; case .chapter: "book"; case .exercise: "pencil.and.list.clipboard"
         case .algorithm: "list.number"; case .theorem: "checkmark.seal"; case .link: "link"; case .citation: "quote.opening"
         }
     }
 }
 
 /// Identifies one numbered object, independent of how a sentence spells it.
-/// `name` distinguishes theorem-like statements, such as Lemma 2.1 and Theorem 2.1.
+/// `name` distinguishes theorem-like statements and lettered charts that repeat in different boxes.
 public struct ReferenceKey: Hashable, Codable, Sendable {
     public var kind: ReferenceKind
     public var number: String
@@ -45,7 +46,11 @@ public struct ReferenceKey: Hashable, Codable, Sendable {
     }
 
     /// A longer description for headers and accessibility, for example "Equation (2.3)".
-    public var spokenTitle: String { kind == .equation ? "Equation (\(number))" : title }
+    public var spokenTitle: String {
+        if kind == .equation { return "Equation (\(number))" }
+        if kind == .chart, let name { return "\(title) (\(name))" }
+        return title
+    }
 
     /// The text to search for when listing the places that mention this object.
     public var searchText: String {
@@ -96,6 +101,8 @@ public enum ReferenceScanner {
     private static let prefixedEquation = try! NSRegularExpression(pattern: "\\b(?:[Ee]qs?\\.|[Ee]quations?|EQUATIONS?)\\s*\\(([1-9]\\d{0,2}[a-z]?)\\)")
     private static let separator = try! NSRegularExpression(pattern: "(?:\\s*,\\s*(?:and\\s+|&\\s*)?|\\s+and\\s+|\\s*&\\s*|\\s*[–\u{2014}-]\\s*|\\s+to\\s+)")
     private static let listedNumber = try! NSRegularExpression(pattern: "(\(number))(?![\\p{N}])")
+    private static let chartNumber = try! NSRegularExpression(pattern: "(\(number)|[A-Z](?:(?:\\.\\d{1,3}){1,3}[a-z]?)?)(?![\\p{L}\\p{N}]|\\.\\d)")
+    private static let featureLetter = try! NSRegularExpression(pattern: #"([A-Z])(?![\p{L}\p{N}]|\.\d)"#)
     private static let listedEquation = try! NSRegularExpression(pattern: "\\(([1-9]\\d{0,2}[a-z]?)\\)")
     private static let heading = try! NSRegularExpression(pattern: "^(\\d{1,2}(?:\\.\\d{1,2}){1,3})\\.?\\s*(?=\\p{Lu}[\\p{Ll}\\p{Lu}])", options: [.anchorsMatchLines])
 
@@ -103,13 +110,17 @@ public enum ReferenceScanner {
         let expression: NSRegularExpression
         let kind: ReferenceKind
         let named: Bool
+        var label = ReferenceScanner.listedNumber
     }
 
     /// Heads match in any case: some books write “figure 3.7” and “section 2.3” in running text, and small capitals
     /// print “lemma 16.2” in lower case. Lower-case mentions that name nothing the book defines are dropped later.
     private static let heads: [Head] = [
         Head(expression: try! NSRegularExpression(pattern: "\\b(?i:figures?|figs?\\.)\\s*(?=[1-9])"), kind: .figure, named: false),
+        Head(expression: try! NSRegularExpression(pattern: #"\b(?i:charts?)\s*(?=[1-9A-Z])"#), kind: .chart, named: false, label: chartNumber),
         Head(expression: try! NSRegularExpression(pattern: "\\b(?i:tables?|tabs?\\.)\\s*(?=[1-9])"), kind: .table, named: false),
+        Head(expression: try! NSRegularExpression(pattern: #"\b(?i:box(?:es)?)\s*(?=[1-9])"#), kind: .box, named: false),
+        Head(expression: try! NSRegularExpression(pattern: #"\b(?i:special\s+features?)\s+(?=[A-Z])"#), kind: .specialFeature, named: false, label: featureLetter),
         Head(expression: try! NSRegularExpression(pattern: "(?:\\b(?i:sections?|sects?\\.|secs?\\.)\\s*|§§?\\s*)(?=[1-9])"), kind: .section, named: false),
         Head(expression: try! NSRegularExpression(pattern: "\\b(?i:chapters?|chaps?\\.)\\s*(?=[1-9])"), kind: .chapter, named: false),
         Head(expression: try! NSRegularExpression(pattern: "\\b(?i:exercises?|exs?\\.|problems?|probs?\\.)\\s*(?=[1-9])"), kind: .exercise, named: false),
@@ -164,7 +175,7 @@ public enum ReferenceScanner {
                 let name = head.named ? statementName(string.substring(with: match.range(at: 1))) : nil
                 var location = match.range.upperBound
                 var first = true, dotted = false, count = 0
-                while count < 8, let item = anchored(listedNumber, at: location) {
+                while count < 8, let item = anchored(head.label, at: location) {
                     let label = string.substring(with: item.range(at: 1))
                     // List items share the first item's shape: "Figures 2.1 and 2.2", never "Figure 2.1 and 15 points".
                     if first { dotted = label.contains(".") } else if label.contains(".") != dotted { break }
@@ -175,7 +186,7 @@ public enum ReferenceScanner {
                     }
                     first = false; count += 1
                     location = item.range.upperBound
-                    guard let gap = anchored(separator, at: location), anchored(listedNumber, at: gap.range.upperBound) != nil else { break }
+                    guard let gap = anchored(separator, at: location) else { break }
                     location = gap.range.upperBound
                 }
             }
@@ -514,6 +525,38 @@ public enum ReferenceLayout {
         let minY = rows[bottom].minY, maxY = max(rows[index].maxY, start.maxY)
         let minX = min(column.lowerBound, start.minX), maxX = max(column.upperBound, start.maxX)
         return padded(CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY), page: page)
+    }
+
+    /// Report charts put the caption above the artwork. Panel labels and notes are smaller than the caption,
+    /// and the artwork itself may contribute no text at all, so a gap between panel labels and notes is expected.
+    static func chartRegion(caption: CGRect, fragments: [LayoutFragment], images: [CGRect], page: CGRect) -> CGRect {
+        // Raster panels start below the title. Their bounds also recover panel edges when the labels read as separate columns.
+        let artwork = images.filter { image in
+            image.width >= 40 && image.height >= 40 && image.minX >= caption.minX - 12 &&
+            (caption.minY - 144...caption.minY + 2).contains(image.maxY)
+        }.reduce(CGRect.null) { $0.union($1) }
+        let textColumn = column(containing: caption.midX, near: caption.midY, fragments: fragments, page: page, margins: true)
+        let column = artwork.isNull ? textColumn : min(textColumn.lowerBound, artwork.minX)...max(textColumn.upperBound, artwork.maxX)
+        let footer = page.minY + 36
+        let rows = rows(fragments, in: (column.lowerBound - 4)...(column.upperBound + 4)).filter { $0.maxY > footer }
+        guard let index = row(containing: caption.midY, in: rows) else { return padded(caption, page: page) }
+        var titleEnd = index
+        while titleEnd + 1 < rows.count, rows[titleEnd].minY - rows[titleEnd + 1].maxY <= 6,
+              isProse(rows[titleEnd + 1].text) { titleEnd += 1 }
+        let end = rows.indices.dropFirst(titleEnd + 1).first { i in
+            let line = rows[i]
+            guard artwork.isNull || line.maxY < artwork.minY else { return false }
+            guard line.maxY - line.minY >= 0.92 * caption.height else { return false }
+            let text = line.text.trimmingCharacters(in: .whitespaces)
+            return isBodyText(line, column: column) || text.hasPrefix("Chart ") || text.hasPrefix("Box ")
+        }
+        let contents = rows[index..<(end ?? rows.count)]
+        let left = min(caption.minX, column.lowerBound)
+        let right = max(caption.maxX, column.upperBound, contents.map(\.maxX).max() ?? column.upperBound)
+        let textBottom = end.map { rows[$0].maxY + 4 } ?? (artwork.isNull ? footer : contents.last?.minY ?? footer)
+        let bottom = artwork.isNull ? textBottom : min(textBottom, artwork.minY)
+        return padded(CGRect(x: left, y: min(caption.minY, bottom), width: right - left,
+                             height: caption.maxY - min(caption.minY, bottom)), page: page)
     }
 
     /// Line bounds already include ascenders and descenders; a little vertical room avoids neighbouring lines.

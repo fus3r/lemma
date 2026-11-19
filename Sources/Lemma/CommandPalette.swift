@@ -104,6 +104,16 @@ struct PaletteProvider {
             let number = string.substring(with: match.range(at: 1))
             items += objectItems(number: number, kinds: query.hasPrefix("(") ? [.equation] : [.equation, .section, .figure, .table, .algorithm, .exercise])
         }
+        let lower = query.lowercased()
+        if lower.hasPrefix("chart ") || lower.hasPrefix("box ") || lower.hasPrefix("special feature ") {
+            let page = store.reader.focusPageIndex
+            let targets = (store.analysis?.analysis?.definitions ?? []).filter {
+                [.chart, .box, .specialFeature].contains($0.key.kind) && $0.key.title.caseInsensitiveCompare(query) == .orderedSame
+            }
+            var seen = Set<ReferenceKey>()
+            items += targets.sorted { abs($0.pageIndex - page) < abs($1.pageIndex - page) }
+                .filter { seen.insert($0.key).inserted }.map(symbolItem)
+        }
         return items
     }
 

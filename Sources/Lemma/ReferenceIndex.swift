@@ -9,6 +9,7 @@ final class ReferenceIndex {
     let workspaceID: String
     private(set) weak var document: PDFDocument?
     let outline: [OutlineItem]
+    private let report: ReportReferences
     private let repository: DocumentIndexRepository
     private var cache: ReferenceCache
     private var definitions: [ReferenceKey: ReferenceTarget] = [:]
@@ -23,6 +24,7 @@ final class ReferenceIndex {
 
     init(workspaceID: String, document: PDFDocument, outline: [OutlineItem], repository: DocumentIndexRepository) {
         self.workspaceID = workspaceID; self.document = document; self.outline = outline; self.repository = repository
+        report = ReportReferences(outline: outline)
         cache = repository.referenceCache(workspaceID) ?? ReferenceCache()
         for target in cache.targets where definitions[target.key] == nil { definitions[target.key] = target }
     }
@@ -39,7 +41,12 @@ final class ReferenceIndex {
         if let cached = mentionCache[index] { return cached }
         guard let document, let page = document.page(at: index) else { return [] }
         scan(index)
-        var found = PageReferenceAnalyzer.mentions(on: page, in: document, plainEquations: analysis?.plainEquations ?? [])
+        var found = PageReferenceAnalyzer.mentions(on: page, in: document, plainEquations: analysis?.plainEquations ?? []).map { mention in
+            var mention = mention
+            let y = mention.destination == nil ? mention.rects.first?.midY : mention.destination?.point?.y
+            mention.key = report.key(for: mention.key, onPage: mention.destination?.pageIndex ?? index, y: y)
+            return mention
+        }
         if let analysis, analysis.analysis != nil {
             // Once the whole book is read, a mention links only to something the book defines, under the label it uses:
             // “figure 3” in running text or “(2.34)” for result 2.34 resolve, dead references do not underline.
@@ -66,7 +73,7 @@ final class ReferenceIndex {
                 }
             }
         }
-        let local = cache.targets.filter { $0.pageIndex == index }
+        let local = (analysis?.definitionsByPage[index] ?? []) + cache.targets.filter { $0.pageIndex == index }
         for position in found.indices where found[position].destination == nil {
             let mention = found[position]
             if let anchor = local.first(where: { $0.key == mention.key })?.anchor.rect.insetBy(dx: -1, dy: -1) {
@@ -119,33 +126,36 @@ final class ReferenceIndex {
         mentions(onPage: index).first { $0.contains(point) }
     }
 
-    func knownTarget(_ key: ReferenceKey) -> ReferenceTarget? { analysis?.target(for: key) ?? definitions[key] }
+    func knownTarget(_ key: ReferenceKey) -> ReferenceTarget? { analysis?.target(for: key) ?? definitions[key] ?? outlineTarget(for: key) }
+
+    /// The PDF's own destination is authoritative, including when the index is ready.
+    func linkedTarget(for mention: PageMention) -> ReferenceTarget? {
+        guard let destination = mention.destination, let document else { return nil }
+        if mention.key.kind == .chart, var target = analysis?.definitionsByKey[mention.key],
+           target.pageIndex == destination.pageIndex {
+            target.origin = .link
+            return target
+        }
+        return PageReferenceAnalyzer.target(for: destination, key: mention.key, in: document, origin: .link)
+    }
 
     /// Underlines change once citations are linked; pages are measured again on demand.
     func invalidateMentions() { mentionCache = [:]; mentionOrder = [] }
 
     /// Resolves a clicked mention. Internal PDF links are exact; text mentions are looked up.
     func resolve(_ mention: PageMention, from pageIndex: Int, progress: ((Int, Int) -> Void)? = nil) async -> ReferenceTarget? {
-        if let destination = mention.destination, let document {
-            return PageReferenceAnalyzer.target(for: destination, key: mention.key, in: document, origin: .link)
-        }
+        if mention.destination != nil { return linkedTarget(for: mention) }
         return await resolve(mention.key, from: pageIndex, progress: progress)
     }
 
-    func resolve(_ key: ReferenceKey, from pageIndex: Int, progress: ((Int, Int) -> Void)? = nil) async -> ReferenceTarget? {
+    func resolve(_ key: ReferenceKey, from pageIndex: Int, y: CGFloat? = nil, progress: ((Int, Int) -> Void)? = nil) async -> ReferenceTarget? {
         guard let document else { return nil }
+        let key = report.key(for: key, onPage: pageIndex, y: y)
         if key.kind == .citation { return analysis?.target(for: key) }
         // An outline entry is authoritative for chapters and sections; text headings are a fallback.
-        if key.kind == .chapter || key.kind == .section {
-            if let known = outlineTargets[key] { return known }
-            if let item = outlineItem(for: key),
-               let target = PageReferenceAnalyzer.target(for: LinkDestination(pageIndex: item.pageIndex, point: item.point), key: key, in: document, origin: .outline) {
-                outlineTargets[key] = target
-                return target
-            }
-        }
-        // The analysis first, as `knownTarget` (the hover) does, so a click and a hover always agree.
+        if let target = outlineTarget(for: key) { return target }
         if let known = analysis?.definitionsByKey[key] ?? definitions[key] { return known }
+        if let heading = report.headings.first(where: { $0.key == key }) { return heading.target(in: document) }
         let order = pageOrder(for: key, from: pageIndex, pageCount: document.pageCount)
         let pending = order.filter { !cache.scannedPages.contains($0) }
         for (count, index) in pending.enumerated() {
@@ -167,6 +177,16 @@ final class ReferenceIndex {
         return OutlineMap.chapterRange(chapter, in: outline, pageCount: document.pageCount)
     }
 
+    private func outlineTarget(for key: ReferenceKey) -> ReferenceTarget? {
+        guard key.kind == .chapter || key.kind == .section, let document else { return nil }
+        if let known = outlineTargets[key] { return known }
+        guard let item = outlineItem(for: key), let target = PageReferenceAnalyzer.target(
+            for: LinkDestination(pageIndex: item.pageIndex, point: item.point), key: key, in: document, origin: .outline
+        ) else { return nil }
+        outlineTargets[key] = target
+        return target
+    }
+
     private func outlineItem(for key: ReferenceKey) -> OutlineItem? {
         if key.kind == .section { return OutlineMap.section(key.number, in: outline) }
         guard let range = chapterRange(for: key) else { return nil }
@@ -175,7 +195,9 @@ final class ReferenceIndex {
 
     private func scan(_ index: Int) {
         guard !cache.scannedPages.contains(index), let page = document?.page(at: index) else { return }
-        for target in PageReferenceAnalyzer.definitions(on: page, pageIndex: index) where definitions[target.key] == nil {
+        for var target in PageReferenceAnalyzer.definitions(on: page, pageIndex: index) {
+            target.key = report.key(for: target.key, onPage: index, y: target.anchor.rect.midY)
+            guard definitions[target.key] == nil else { continue }
             definitions[target.key] = target
             cache.targets.append(target)
         }
